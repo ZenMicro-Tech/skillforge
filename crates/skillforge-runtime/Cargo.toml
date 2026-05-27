@@ -1,0 +1,15 @@
+[package]
+name        = "skillforge-runtime"
+version.workspace     = true
+edition.workspace     = true
+rust-version.workspace = true
+license.workspace     = true
+repository.workspace  = true
+description = "Runtime library linked into every compiled skillforge skill — four-mode dispatcher."
+
+[dependencies]
+skillforge-core = { workspace = true }
+skillforge-mcp  = { workspace = true }
+anyhow          = { workspace = true }
+serde_json      = { workspace = true }
+toml            = { workspace = true }

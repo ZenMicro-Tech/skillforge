@@ -1,0 +1,13 @@
+[package]
+name        = "skillforge-mcp"
+version.workspace     = true
+edition.workspace     = true
+rust-version.workspace = true
+license.workspace     = true
+repository.workspace  = true
+description = "Minimal MCP stdio server wrapping a single skillforge skill as a one-tool MCP server."
+
+[dependencies]
+anyhow     = { workspace = true }
+serde      = { workspace = true }
+serde_json = { workspace = true }

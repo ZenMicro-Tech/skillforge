@@ -1,0 +1,25 @@
+[package]
+name        = "skillforge-cli"
+version.workspace     = true
+edition.workspace     = true
+rust-version.workspace = true
+license.workspace     = true
+repository.workspace  = true
+description = "skillforge — author, build, and run AI skill binaries."
+
+[[bin]]
+name = "skillforge"
+path = "src/main.rs"
+
+[dependencies]
+skillforge-core = { workspace = true }
+skillforge-mcp  = { workspace = true }
+anyhow          = { workspace = true }
+clap            = { workspace = true }
+serde           = { workspace = true }
+serde_json      = { workspace = true }
+
+# Native OCI client (replaces shell-out to `oras`).
+oci-client      = { version = "0.17", default-features = false, features = ["rustls-tls"] }
+tokio           = { version = "1", features = ["rt", "macros", "io-util", "fs"] }
+bytes           = "1"
