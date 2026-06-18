@@ -1576,6 +1576,7 @@ dependencies = [
  "bytes",
  "clap",
  "oci-client",
+ "oci-spec",
  "serde",
  "serde_json",
  "skillforge-core",

@@ -6,9 +6,10 @@
 use anyhow::{anyhow, Context, Result};
 use bytes::Bytes;
 use oci_client::client::{Client, ClientConfig, Config, ImageLayer};
-use oci_client::manifest::OciImageManifest;
+use oci_client::manifest::{ImageIndexEntry, OciImageIndex, OciImageManifest, Platform};
 use oci_client::secrets::RegistryAuth;
 use oci_client::Reference;
+use oci_spec::image::{Arch, Os};
 use std::collections::BTreeMap;
 use std::path::Path;
 use tokio::io::AsyncWriteExt;
@@ -29,7 +30,13 @@ pub struct PushRequest<'a> {
     pub annotations: BTreeMap<String, String>,
 }
 
-pub fn push(req: PushRequest<'_>) -> Result<String> {
+pub struct PushResult {
+    pub manifest_url: String,
+    pub manifest_digest: String,
+    pub manifest_size: i64,
+}
+
+pub fn push(req: PushRequest<'_>) -> Result<PushResult> {
     let reference = parse_ref(req.reference)?;
     let auth = auth_for_push(&reference)?;
     let layers = read_layers(req.files)?;
@@ -49,9 +56,87 @@ pub fn push(req: PushRequest<'_>) -> Result<String> {
             .push(&reference, &layers, config, &auth, Some(manifest))
             .await
             .context("oci push")?;
-        Ok(resp.manifest_url)
+
+        // Re-fetch to get the authoritative digest and serialized size
+        let (stored_manifest, stored_digest) = client
+            .pull_image_manifest(&reference, &auth)
+            .await
+            .context("fetching stored manifest")?;
+        let manifest_size = serde_json::to_vec(&stored_manifest)?.len() as i64;
+
+        Ok(PushResult {
+            manifest_url: resp.manifest_url,
+            manifest_digest: stored_digest,
+            manifest_size,
+        })
     })
 }
+
+pub struct IndexEntry {
+    pub digest: String,
+    pub size: i64,
+    pub os: &'static str,
+    pub arch: &'static str,
+}
+
+pub fn push_index(reference: &str, entries: &[IndexEntry]) -> Result<String> {
+    let parsed = parse_ref(reference)?;
+    let auth = auth_for_push(&parsed)?;
+
+    let manifests: Vec<ImageIndexEntry> = entries
+        .iter()
+        .map(|e| ImageIndexEntry {
+            media_type: "application/vnd.oci.image.manifest.v1+json".to_string(),
+            digest: e.digest.clone(),
+            size: e.size,
+            platform: Some(Platform {
+                architecture: arch_from_str(e.arch),
+                os: os_from_str(e.os),
+                os_version: None,
+                os_features: None,
+                variant: None,
+                features: None,
+            }),
+            annotations: None,
+            artifact_type: Some(ARTIFACT_TYPE.to_string()),
+        })
+        .collect();
+
+    let index = OciImageIndex {
+        schema_version: 2,
+        media_type: Some("application/vnd.oci.image.index.v1+json".to_string()),
+        manifests,
+        artifact_type: Some(ARTIFACT_TYPE.to_string()),
+        annotations: None,
+    };
+
+    block_on(async move {
+        let client = Client::new(ClientConfig::default());
+        let url = client
+            .push_manifest_list(&parsed, &auth, index)
+            .await
+            .context("push image index")?;
+        Ok(url)
+    })
+}
+
+fn arch_from_str(s: &str) -> Arch {
+    match s {
+        "amd64" => Arch::Amd64,
+        "arm64" => Arch::ARM64,
+        _ => Arch::Other(s.to_string()),
+    }
+}
+
+fn os_from_str(s: &str) -> Os {
+    match s {
+        "linux" => Os::Linux,
+        "darwin" => Os::Darwin,
+        "windows" => Os::Windows,
+        _ => Os::Other(s.to_string()),
+    }
+}
+
 
 pub struct PullResult {
     pub manifest_digest: String,

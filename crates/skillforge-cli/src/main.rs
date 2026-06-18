@@ -35,6 +35,13 @@ enum Command {
         /// Override the `[publish].repo` from skill.toml.
         #[arg(long)]
         repo: Option<String>,
+        /// Path to skill directory (overrides name-based resolution).
+        #[arg(long)]
+        path: Option<String>,
+        /// Rust target triple(s) to build for. Repeat for multi-arch.
+        /// e.g. --target aarch64-apple-darwin --target x86_64-unknown-linux-gnu
+        #[arg(long)]
+        target: Vec<String>,
     },
     /// Scaffold a new skill directory from the rust-skill template.
     New {
@@ -87,9 +94,9 @@ enum Command {
         #[arg(long = "agent")]
         agents: Vec<String>,
     },
-    /// (advanced) Show which agents a built skill is linked to.
-    #[command(hide = true)]
+    /// List installed skills, or show detail for a specific skill.
     List {
+        /// Show detail (linked agents) for a specific skill directory.
         #[arg(long)]
         path: Option<String>,
     },
@@ -118,7 +125,12 @@ fn main() -> Result<()> {
     match cli.command {
         Command::Add { name_or_ref } => commands::add::add(&name_or_ref),
         Command::Remove { name } => commands::add::remove(&name),
-        Command::Publish { name, repo } => commands::publish::publish(&name, repo.as_deref()),
+        Command::Publish {
+            name,
+            repo,
+            path,
+            target,
+        } => commands::publish::publish(&name, repo.as_deref(), path.as_deref(), &target),
         Command::New { name, path } => commands::new::run(&name, path.as_deref()),
         Command::Build { path } => commands::build::run(path.as_deref()),
         Command::Run { path, args } => commands::delegate::run(path.as_deref(), "run", &args),

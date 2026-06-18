@@ -1,11 +1,20 @@
 use anyhow::{anyhow, bail, Context, Result};
 use std::collections::BTreeMap;
+use std::path::PathBuf;
 
-use crate::oci::{self, PushFile, PushRequest};
+use crate::oci::{self, IndexEntry, PushFile, PushRequest, PushResult};
 use crate::sources;
 
-pub fn publish(name: &str, repo_override: Option<&str>) -> Result<()> {
-    let dir = sources::resolve(name)?;
+pub fn publish(
+    name: &str,
+    repo_override: Option<&str>,
+    path: Option<&str>,
+    targets: &[String],
+) -> Result<()> {
+    let dir = match path {
+        Some(p) => PathBuf::from(p),
+        None => sources::resolve(name)?,
+    };
     let manifest = skillforge_core::Manifest::from_path(dir.join("skill.toml"))?;
 
     let repo = match repo_override {
@@ -23,44 +32,136 @@ pub fn publish(name: &str, repo_override: Option<&str>) -> Result<()> {
             })?,
     };
 
-    // Always rebuild before publish: skill.toml / prompt.md / schema.json are embedded
-    // at build time via build.rs, and Cargo's change detection on those files via
-    // `cargo:rerun-if-changed` works only if the source files mtime forward. Forcing a
-    // build avoids shipping a stale embedded version.
-    super::build::run(Some(&dir.display().to_string()))?;
-    let bin = dir.join("target/release").join(&manifest.skill.name);
+    let tag = &manifest.skill.version;
+
+    if targets.is_empty() {
+        return publish_single(&dir, &manifest, &repo, tag, None);
+    }
+
+    if targets.len() == 1 {
+        return publish_single(&dir, &manifest, &repo, tag, Some(&targets[0]));
+    }
+
+    publish_multiarch(&dir, &manifest, &repo, tag, targets)
+}
+
+fn publish_single(
+    dir: &PathBuf,
+    manifest: &skillforge_core::Manifest,
+    repo: &str,
+    tag: &str,
+    target: Option<&str>,
+) -> Result<()> {
+    let bin = super::build::run_for_target(Some(&dir.display().to_string()), target)?;
     if !bin.exists() {
         bail!("binary missing after build: {}", bin.display());
     }
 
-    let toml_path = dir.join("skill.toml");
-    let prompt_path = dir.join("prompt.md");
-    let schema_path = dir.join("schema.json");
-
-    let tag = &manifest.skill.version;
-    let platform = current_platform();
+    let platform = match target {
+        Some(t) => platform_from_target(t),
+        None => current_platform(),
+    };
     let reference = format!("{repo}:{tag}");
 
     eprintln!("publishing {}:{} to {repo}", manifest.skill.name, tag);
     eprintln!("  platform: {platform}");
 
+    let annotations = build_annotations(manifest, tag, &platform);
+    let result = push_skill(dir, &bin, &manifest.skill.name, &reference, annotations)?;
+
+    eprintln!("✓ published {reference}");
+    eprintln!("  manifest: {}", result.manifest_url);
+    Ok(())
+}
+
+fn publish_multiarch(
+    dir: &PathBuf,
+    manifest: &skillforge_core::Manifest,
+    repo: &str,
+    tag: &str,
+    targets: &[String],
+) -> Result<()> {
+    eprintln!(
+        "publishing {}:{} (multi-arch) to {repo}",
+        manifest.skill.name, tag
+    );
+
+    let mut index_entries: Vec<IndexEntry> = Vec::new();
+
+    for target in targets {
+        let (os, arch) = parse_rust_target(target)?;
+        let platform_tag = format!("{tag}-{os}-{arch}");
+        let reference = format!("{repo}:{platform_tag}");
+        let platform = format!("{os}-{arch}");
+
+        eprintln!("\n  building for {target}...");
+        let bin = super::build::run_for_target(Some(&dir.display().to_string()), Some(target))?;
+        if !bin.exists() {
+            bail!("binary missing after build for {target}: {}", bin.display());
+        }
+
+        let annotations = build_annotations(manifest, tag, &platform);
+
+        eprintln!("  pushing {reference}...");
+        let result = push_skill(dir, &bin, &manifest.skill.name, &reference, annotations)?;
+
+        eprintln!("  ✓ {platform_tag} → {}", result.manifest_digest);
+        index_entries.push(IndexEntry {
+            digest: result.manifest_digest,
+            size: result.manifest_size,
+            os: leak_str(os),
+            arch: leak_str(arch),
+        });
+    }
+
+    let index_ref = format!("{repo}:{tag}");
+    eprintln!("\npushing image index as {index_ref}...");
+    let url = oci::push_index(&index_ref, &index_entries)
+        .with_context(|| format!("pushing image index to {index_ref}"))?;
+
+    eprintln!("✓ published multi-arch manifest: {index_ref}");
+    eprintln!("  index: {url}");
+    Ok(())
+}
+
+fn build_annotations(
+    manifest: &skillforge_core::Manifest,
+    tag: &str,
+    platform: &str,
+) -> BTreeMap<String, String> {
     let mut annotations = BTreeMap::new();
     annotations.insert(
         "skillforge.skill.name".to_string(),
         manifest.skill.name.clone(),
     );
-    annotations.insert("skillforge.skill.version".to_string(), tag.clone());
-    annotations.insert("skillforge.skill.platform".to_string(), platform);
+    annotations.insert("skillforge.skill.version".to_string(), tag.to_string());
+    annotations.insert(
+        "skillforge.skill.platform".to_string(),
+        platform.to_string(),
+    );
     annotations.insert(
         "org.opencontainers.image.description".to_string(),
         manifest.skill.description.clone(),
     );
+    annotations
+}
+
+fn push_skill(
+    dir: &PathBuf,
+    bin: &PathBuf,
+    name: &str,
+    reference: &str,
+    annotations: BTreeMap<String, String>,
+) -> Result<PushResult> {
+    let toml_path = dir.join("skill.toml");
+    let prompt_path = dir.join("prompt.md");
+    let schema_path = dir.join("schema.json");
 
     let files = [
         PushFile {
-            path: &bin,
+            path: bin,
             media_type: "application/vnd.skillforge.binary",
-            title: &manifest.skill.name,
+            title: name,
         },
         PushFile {
             path: &toml_path,
@@ -79,16 +180,35 @@ pub fn publish(name: &str, repo_override: Option<&str>) -> Result<()> {
         },
     ];
 
-    let manifest_url = oci::push(PushRequest {
-        reference: &reference,
+    oci::push(PushRequest {
+        reference,
         files: &files,
         annotations,
     })
-    .with_context(|| format!("publishing to {reference}"))?;
+    .with_context(|| format!("publishing to {reference}"))
+}
 
-    eprintln!("✓ published {reference}");
-    eprintln!("  manifest: {manifest_url}");
-    Ok(())
+fn parse_rust_target(target: &str) -> Result<(String, String)> {
+    let parts: Vec<&str> = target.split('-').collect();
+    if parts.len() < 3 {
+        bail!("invalid target triple: {target}");
+    }
+    let arch = match parts[0] {
+        "aarch64" => "arm64",
+        "x86_64" => "amd64",
+        "arm" => "arm",
+        a => a,
+    };
+    let os = if target.contains("linux") {
+        "linux"
+    } else if target.contains("darwin") || target.contains("apple") {
+        "darwin"
+    } else if target.contains("windows") {
+        "windows"
+    } else {
+        parts[2]
+    };
+    Ok((os.to_string(), arch.to_string()))
 }
 
 fn current_platform() -> String {
@@ -100,4 +220,18 @@ fn current_platform() -> String {
         a => a,
     };
     format!("{os}-{arch}")
+}
+
+fn platform_from_target(target: &str) -> String {
+    match parse_rust_target(target) {
+        Ok((os, arch)) => format!("{os}-{arch}"),
+        Err(_) => current_platform(),
+    }
+}
+
+/// Leaks a String to get a `&'static str`. Used for IndexEntry which requires
+/// `&'static str` fields. Acceptable here since we only leak a handful of short
+/// platform strings per process lifetime.
+fn leak_str(s: String) -> &'static str {
+    Box::leak(s.into_boxed_str())
 }
