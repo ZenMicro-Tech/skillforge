@@ -1,4 +1,5 @@
 use crate::adapters::{self, SkillRef, Status};
+use crate::registry;
 use anyhow::{bail, Result};
 use std::path::{Path, PathBuf};
 
@@ -70,6 +71,29 @@ pub fn unlink(path: Option<&str>, only: Option<&[String]>) -> Result<()> {
 }
 
 pub fn list(path: Option<&str>) -> Result<()> {
+    if let Some(p) = path {
+        return list_detail(Some(p));
+    }
+    list_all()
+}
+
+fn list_all() -> Result<()> {
+    let reg = registry::load()?;
+    if reg.skills.is_empty() {
+        println!("No skills installed.");
+        println!("  Use `skillforge add <name>` to install a skill.");
+        return Ok(());
+    }
+    println!("{:<20} {:<10} {}", "NAME", "VERSION", "DESCRIPTION");
+    println!("{:<20} {:<10} {}", "----", "-------", "-----------");
+    for (name, entry) in &reg.skills {
+        println!("{:<20} {:<10} {}", name, entry.version, entry.description);
+    }
+    println!("\n{} skill(s) installed.", reg.skills.len());
+    Ok(())
+}
+
+fn list_detail(path: Option<&str>) -> Result<()> {
     let (_dir, name, binary) = resolve(path)?;
     let skill = SkillRef {
         name: &name,
