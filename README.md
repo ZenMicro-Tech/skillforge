@@ -1,67 +1,131 @@
 # skillforge
 
-A package manager for AI skills. Build a skill once as a Rust binary; install it into Claude Code, Claude Desktop, Cursor, or any MCP-compatible agent with one command.
+A package manager for AI skills. Build a skill once as a compiled binary; install it into Claude Code, Claude Desktop, Cursor, or any MCP-compatible agent with one command.
 
-A **skill** is a self-contained binary that embeds its own prompt, JSON schema, and code. The same artifact is callable as an MCP tool, a CLI command, an HTTP server, or a library.
+A **skill** is a self-contained binary that embeds its own prompt, JSON schema, and execution logic. The same artifact works as an MCP tool, a CLI command, an HTTP server, or a library — no wrappers, no adapters.
 
-This repo contains the **`skillforge` CLI and runtime** only. Skills themselves live in their own repos — see [skillforge-skills](https://github.com/zenmicro-tech/skillforge-skills) for example skills.
+## Quick Start
 
-## Quickstart
+### 1. Install skillforge
 
-### Prerequisites
-
-- Rust 1.90+
-- At least one MCP-compatible agent (Claude Code, Claude Desktop, or Cursor)
-- [ORAS](https://oras.land/docs/installation) for `publish` and OCI-ref `add` (`brew install oras`)
-
-### Build
+**Prebuilt binary (recommended):**
 
 ```sh
-git clone <this-repo>
-cd ai-skills-platform
-cargo build --workspace
+# macOS (Apple Silicon)
+curl -fSL https://github.com/chasebilling/skillforge/releases/latest/download/skillforge-aarch64-apple-darwin \
+  -o /usr/local/bin/skillforge && chmod +x /usr/local/bin/skillforge
+
+# macOS (Intel)
+curl -fSL https://github.com/chasebilling/skillforge/releases/latest/download/skillforge-x86_64-apple-darwin \
+  -o /usr/local/bin/skillforge && chmod +x /usr/local/bin/skillforge
+
+# Linux (x86_64)
+curl -fSL https://github.com/chasebilling/skillforge/releases/latest/download/skillforge-x86_64-unknown-linux-gnu \
+  -o /usr/local/bin/skillforge && chmod +x /usr/local/bin/skillforge
+
+# Linux (aarch64)
+curl -fSL https://github.com/chasebilling/skillforge/releases/latest/download/skillforge-aarch64-unknown-linux-gnu \
+  -o /usr/local/bin/skillforge && chmod +x /usr/local/bin/skillforge
 ```
 
-Binary at `./target/debug/skillforge`. Add to PATH or alias it.
-
-### Install a skill
-
-`add` accepts either a **local skill name** (resolved from `./skills/<name>` or `~/.skillforge/skills/<name>`) or an **OCI reference**:
+**From source:**
 
 ```sh
-# From a registry
-skillforge add ghcr.io/zenmicro-tech/skills/example-skill:0.1.0
-
-# From a local checkout (e.g. cloned skillforge-skills next to this repo)
-cd ../skillforge-skills
-skillforge add example-skill
+git clone https://github.com/chasebilling/skillforge.git
+cd skillforge
+cargo install --path crates/skillforge-cli
 ```
 
-`add` builds in release mode (or trusts a pulled binary), writes to the registry at `~/.skillforge/registry.json`, and registers with every detected agent. Open a new Claude Code session, run `/mcp`, and the skill appears as a connected tool.
+Verify the install:
 
-OCI refs are detected by the presence of `:` or `/`.
+```sh
+skillforge --version
+```
 
-### Author a new skill
+### 2. Create your first skill
 
 ```sh
 skillforge new my-skill
 cd my-skill
-# Edit src/main.rs, prompt.md, schema.json
-skillforge add ./my-skill         # build + install
-skillforge publish my-skill       # push to OCI (requires [publish].repo in skill.toml)
 ```
 
-### Mux mode (single-server aggregator)
+This scaffolds a ready-to-build skill:
 
-By default each skill is registered as its own MCP server. **Mux mode** registers a single `skillforge` server that aggregates all installed skills:
+```
+my-skill/
+  skill.toml      # metadata: name, version, interfaces
+  prompt.md       # LLM-facing instructions
+  schema.json     # JSON Schema for tool input
+  src/main.rs     # your skill logic
+  build.rs        # embeds prompt + schema into the binary
+  Cargo.toml
+```
+
+### 3. Build and install
 
 ```sh
-skillforge mux enable    # one server, many tools
-skillforge mux status
-skillforge mux disable   # back to per-skill registration
+skillforge add my-skill
 ```
 
-Mux mode re-reads the registry on every `tools/list` call, so newly-added skills appear without restarting agents.
+This compiles the skill, registers it with every detected agent (Claude Code, Claude Desktop, Cursor), and you're done. Open a new agent session and the skill appears as a tool.
+
+### 4. Use it
+
+```sh
+# As a CLI
+skillforge run --path ./my-skill -- --input '{"text": "hello world"}'
+
+# As an MCP server (agents call this automatically)
+skillforge tool --path ./my-skill
+
+# Inspect what's embedded
+skillforge describe --path ./my-skill
+```
+
+### 5. Publish to a registry
+
+```sh
+skillforge publish my-skill
+```
+
+Others can then install it with:
+
+```sh
+skillforge add ghcr.io/yourname/skills/my-skill:0.1.0
+```
+
+---
+
+## Example: word-count skill with a Python agent
+
+The [`skills/word-count`](skills/word-count/) directory shows a complete skill. Here's how to wire it up to a [Strands](https://github.com/strands-agents/sdk-python) agent:
+
+```sh
+cd skills/word-count
+skillforge build --path .
+python agent.py "How many words are in the Gettysburg Address?"
+```
+
+The agent calls the compiled binary over MCP stdio — no HTTP, no containers, no config files:
+
+```python
+from strands import Agent
+from strands.tools.mcp import MCPClient
+from mcp import StdioServerParameters
+from mcp.client.stdio import stdio_client
+
+mcp = MCPClient(lambda: stdio_client(
+    StdioServerParameters(command="./target/release/word-count", args=["tool"])
+))
+
+with mcp:
+    agent = Agent(model=model, tools=[mcp])
+    print(agent("Count the words in this text: ..."))
+```
+
+See [`examples/s3-agent`](examples/s3-agent/) for a Dockerized example that pulls a skill from an OCI registry at build time.
+
+---
 
 ## Commands
 
@@ -77,17 +141,19 @@ Mux mode re-reads the registry on every `tools/list` call, so newly-added skills
 | `skillforge describe [--path]` | Print embedded manifest, prompt, and schema |
 | `skillforge mux enable\|disable\|status` | Toggle the single-server aggregator |
 
-## Skill anatomy
+## Mux mode
 
+By default each skill is its own MCP server. **Mux mode** registers a single `skillforge` server that aggregates all installed skills:
+
+```sh
+skillforge mux enable    # one server, many tools
+skillforge mux status
+skillforge mux disable   # back to per-skill registration
 ```
-my-skill/
-  skill.toml      # name, version, runtime, interfaces, [publish].repo
-  prompt.md       # LLM-facing instructions
-  schema.json     # JSON Schema for tool input
-  Cargo.toml      # Rust package (with [workspace] opt-out)
-  build.rs        # embeds toml/md/json into the binary
-  src/main.rs     # implements skillforge_runtime::SkillHandler
-```
+
+Mux mode re-reads the registry on every `tools/list` call, so newly-added skills appear without restarting agents.
+
+## How skills work
 
 The compiled binary supports four modes selected by the first argument:
 
@@ -98,15 +164,16 @@ The compiled binary supports four modes selected by the first argument:
 | `serve` | remote agent | HTTP/SSE (Phase 2) |
 | `describe` | tooling | Dump embedded prompt + schema |
 
+## Prerequisites
+
+- Rust 1.85+
+- At least one MCP-compatible agent (Claude Code, Claude Desktop, or Cursor)
+- [ORAS](https://oras.land/docs/installation) for `publish` and OCI-ref `add` (`brew install oras`)
+
 ## Configuration
 
 - `SKILLFORGE_HOME` — overrides `~/.skillforge`. Useful for tests and CI.
 
-## Repos
-
-- **ai-skills-platform** (this repo) — `skillforge` CLI, `skillforge-runtime`, `skillforge-mcp`, `skillforge-core`.
-- **[skillforge-skills](https://github.com/zenmicro-tech/skillforge-skills)** — example and reference skills.
-
 ## Architecture
 
-See [plan.md](plan.md) for the full architecture document — design rationale, distribution and signing plans for Phase 2, and sandboxing for Phase 3.
+See [plan.md](plan.md) for the full design document — distribution, signing (Phase 2), and sandboxing (Phase 3).
