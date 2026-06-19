@@ -12,26 +12,26 @@ A **skill** is a self-contained binary that embeds its own prompt, JSON schema, 
 
 ```sh
 # macOS (Apple Silicon)
-curl -fSL https://github.com/chasebilling/skillforge/releases/latest/download/skillforge-aarch64-apple-darwin \
+curl -fSL https://github.com/ZenMicro-Tech/skillforge/releases/latest/download/skillforge-aarch64-apple-darwin \
   -o /usr/local/bin/skillforge && chmod +x /usr/local/bin/skillforge
 
 # macOS (Intel)
-curl -fSL https://github.com/chasebilling/skillforge/releases/latest/download/skillforge-x86_64-apple-darwin \
+curl -fSL https://github.com/ZenMicro-Tech/skillforge/releases/latest/download/skillforge-x86_64-apple-darwin \
   -o /usr/local/bin/skillforge && chmod +x /usr/local/bin/skillforge
 
 # Linux (x86_64)
-curl -fSL https://github.com/chasebilling/skillforge/releases/latest/download/skillforge-x86_64-unknown-linux-gnu \
+curl -fSL https://github.com/ZenMicro-Tech/skillforge/releases/latest/download/skillforge-x86_64-unknown-linux-gnu \
   -o /usr/local/bin/skillforge && chmod +x /usr/local/bin/skillforge
 
 # Linux (aarch64)
-curl -fSL https://github.com/chasebilling/skillforge/releases/latest/download/skillforge-aarch64-unknown-linux-gnu \
+curl -fSL https://github.com/ZenMicro-Tech/skillforge/releases/latest/download/skillforge-aarch64-unknown-linux-gnu \
   -o /usr/local/bin/skillforge && chmod +x /usr/local/bin/skillforge
 ```
 
 **From source:**
 
 ```sh
-git clone https://github.com/chasebilling/skillforge.git
+git clone https://github.com/ZenMicro-Tech/skillforge.git
 cd skillforge
 cargo install --path crates/skillforge-cli
 ```
