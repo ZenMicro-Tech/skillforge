@@ -9,11 +9,11 @@ members = [
 exclude = ["skills/*"]
 
 [workspace.package]
-version = "0.1.2"
+version = "0.1.3"
 edition = "2024"
 rust-version = "1.85"
 license = "Apache-2.0"
-repository = "https://github.com/chasebilling/skillforge"
+repository = "https://github.com/ZenMicro-Tech/skillforge"
 
 [workspace.dependencies]
 skillforge-core    = { path = "crates/skillforge-core", version = "0.1.0" }
