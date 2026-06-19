@@ -8,7 +8,7 @@ mod registry;
 mod sources;
 
 #[derive(Parser)]
-#[command(name = "skillforge", about = "Author, build, and run AI skill binaries.")]
+#[command(name = "skillforge", version, about = "Author, build, and run AI skill binaries.")]
 struct Cli {
     #[command(subcommand)]
     command: Command,
