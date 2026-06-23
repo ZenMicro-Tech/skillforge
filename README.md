@@ -8,24 +8,38 @@ A **skill** is a self-contained binary that embeds its own prompt, JSON schema, 
 
 ### 1. Install skillforge
 
-**Prebuilt binary (recommended):**
+**Homebrew (macOS/Linux):**
 
 ```sh
+brew install ZenMicro-Tech/tap/skillforge
+```
+
+**Prebuilt binary:**
+
+```sh
+mkdir -p ~/.local/bin
+
 # macOS (Apple Silicon)
 curl -fSL https://github.com/ZenMicro-Tech/skillforge/releases/latest/download/skillforge-aarch64-apple-darwin \
-  -o /usr/local/bin/skillforge && chmod +x /usr/local/bin/skillforge
+  -o ~/.local/bin/skillforge && chmod +x ~/.local/bin/skillforge
 
 # macOS (Intel)
 curl -fSL https://github.com/ZenMicro-Tech/skillforge/releases/latest/download/skillforge-x86_64-apple-darwin \
-  -o /usr/local/bin/skillforge && chmod +x /usr/local/bin/skillforge
+  -o ~/.local/bin/skillforge && chmod +x ~/.local/bin/skillforge
 
 # Linux (x86_64)
 curl -fSL https://github.com/ZenMicro-Tech/skillforge/releases/latest/download/skillforge-x86_64-unknown-linux-gnu \
-  -o /usr/local/bin/skillforge && chmod +x /usr/local/bin/skillforge
+  -o ~/.local/bin/skillforge && chmod +x ~/.local/bin/skillforge
 
 # Linux (aarch64)
 curl -fSL https://github.com/ZenMicro-Tech/skillforge/releases/latest/download/skillforge-aarch64-unknown-linux-gnu \
-  -o /usr/local/bin/skillforge && chmod +x /usr/local/bin/skillforge
+  -o ~/.local/bin/skillforge && chmod +x ~/.local/bin/skillforge
+```
+
+Make sure `~/.local/bin` is on your PATH:
+
+```sh
+echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc  # or ~/.bashrc
 ```
 
 **From source:**
