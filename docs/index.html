@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>skillforge — A package manager for AI skills</title>
+    <meta name="description" content="Build a skill once as a compiled binary. Install it into Claude Code, Claude Desktop, Cursor, or any MCP-compatible agent with one command.">
+    <style>
+        :root {
+            --bg: #0f1117;
+            --surface: #1a1d27;
+            --border: #2a2d3a;
+            --text: #e4e4e7;
+            --muted: #9ca3af;
+            --accent: #6366f1;
+            --accent-hover: #818cf8;
+            --green: #34d399;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.6;
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 0 24px;
+        }
+
+        header {
+            padding: 48px 0 0;
+            text-align: center;
+        }
+
+        h1 {
+            font-size: 3rem;
+            font-weight: 700;
+            letter-spacing: -0.02em;
+            margin-bottom: 16px;
+        }
+
+        .tagline {
+            font-size: 1.25rem;
+            color: var(--muted);
+            max-width: 600px;
+            margin: 0 auto 32px;
+        }
+
+        .badges {
+            display: flex;
+            gap: 8px;
+            justify-content: center;
+            flex-wrap: wrap;
+            margin-bottom: 48px;
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 9999px;
+            font-size: 0.8rem;
+            font-weight: 500;
+            border: 1px solid var(--border);
+            color: var(--muted);
+        }
+
+        .install-section {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 32px;
+            margin-bottom: 48px;
+        }
+
+        .install-section h2 {
+            font-size: 1rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--muted);
+            margin-bottom: 16px;
+        }
+
+        .code-block {
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 16px 20px;
+            font-family: 'SF Mono', 'Fira Code', monospace;
+            font-size: 0.9rem;
+            overflow-x: auto;
+            position: relative;
+        }
+
+        .code-block code {
+            color: var(--green);
+        }
+
+        .code-block .prompt {
+            color: var(--muted);
+            user-select: none;
+        }
+
+        .features {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 24px;
+            margin-bottom: 48px;
+        }
+
+        @media (max-width: 600px) {
+            .features {
+                grid-template-columns: 1fr;
+            }
+            h1 {
+                font-size: 2rem;
+            }
+        }
+
+        .feature {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 24px;
+        }
+
+        .feature h3 {
+            font-size: 1rem;
+            margin-bottom: 8px;
+        }
+
+        .feature p {
+            font-size: 0.9rem;
+            color: var(--muted);
+        }
+
+        .example-section {
+            margin-bottom: 48px;
+        }
+
+        .example-section h2 {
+            font-size: 1.5rem;
+            margin-bottom: 16px;
+        }
+
+        .example-section p {
+            color: var(--muted);
+            margin-bottom: 16px;
+        }
+
+        .steps {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+            margin-top: 24px;
+        }
+
+        .step {
+            display: flex;
+            gap: 16px;
+            align-items: flex-start;
+        }
+
+        .step-num {
+            flex-shrink: 0;
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            background: var(--accent);
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.8rem;
+            font-weight: 600;
+        }
+
+        .step-content {
+            flex: 1;
+        }
+
+        .step-content .code-block {
+            margin-top: 8px;
+        }
+
+        .cta {
+            text-align: center;
+            padding: 48px 0;
+            border-top: 1px solid var(--border);
+        }
+
+        .cta a {
+            display: inline-block;
+            padding: 12px 32px;
+            background: var(--accent);
+            color: white;
+            text-decoration: none;
+            border-radius: 8px;
+            font-weight: 500;
+            transition: background 0.2s;
+        }
+
+        .cta a:hover {
+            background: var(--accent-hover);
+        }
+
+        .cta p {
+            margin-top: 12px;
+            color: var(--muted);
+            font-size: 0.9rem;
+        }
+
+        footer {
+            text-align: center;
+            padding: 24px 0;
+            color: var(--muted);
+            font-size: 0.85rem;
+            border-top: 1px solid var(--border);
+        }
+
+        footer a {
+            color: var(--accent);
+            text-decoration: none;
+        }
+
+        footer a:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>skillforge</h1>
+            <p class="tagline">Build a skill once. Install it into any AI agent with one command.</p>
+            <div class="badges">
+                <span class="badge">Claude Code</span>
+                <span class="badge">Claude Desktop</span>
+                <span class="badge">Cursor</span>
+                <span class="badge">Any MCP Agent</span>
+            </div>
+        </header>
+
+        <div class="install-section">
+            <h2>Install</h2>
+            <div class="code-block">
+                <code><span class="prompt">$ </span>brew install ZenMicro-Tech/tap/skillforge</code>
+            </div>
+        </div>
+
+        <div class="features">
+            <div class="feature">
+                <h3>One binary, four interfaces</h3>
+                <p>A skill compiles to a single binary that works as an MCP tool, CLI command, HTTP server, or library.</p>
+            </div>
+            <div class="feature">
+                <h3>Zero config agent registration</h3>
+                <p><code>skillforge add</code> detects your agents and registers the skill automatically.</p>
+            </div>
+            <div class="feature">
+                <h3>OCI distribution</h3>
+                <p>Publish to any OCI registry. Others install with a single reference — no cloning, no building.</p>
+            </div>
+            <div class="feature">
+                <h3>Mux mode</h3>
+                <p>Aggregate all installed skills into a single MCP server. New skills appear without restarting agents.</p>
+            </div>
+        </div>
+
+        <div class="example-section">
+            <h2>Get started in 60 seconds</h2>
+            <div class="steps">
+                <div class="step">
+                    <div class="step-num">1</div>
+                    <div class="step-content">
+                        <p>Scaffold a new skill</p>
+                        <div class="code-block">
+                            <code><span class="prompt">$ </span>skillforge new word-count</code>
+                        </div>
+                    </div>
+                </div>
+                <div class="step">
+                    <div class="step-num">2</div>
+                    <div class="step-content">
+                        <p>Build and install into all detected agents</p>
+                        <div class="code-block">
+                            <code><span class="prompt">$ </span>skillforge add word-count</code>
+                        </div>
+                    </div>
+                </div>
+                <div class="step">
+                    <div class="step-num">3</div>
+                    <div class="step-content">
+                        <p>Open Claude Code — your skill is ready to use</p>
+                        <div class="code-block">
+                            <code><span class="prompt">$ </span>claude<br><span class="prompt">&gt; </span>Count the words in my last commit message</code>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="example-section">
+            <h2>What's a skill?</h2>
+            <p>A self-contained directory with a prompt, schema, and implementation that compiles into a portable binary:</p>
+            <div class="code-block"><code>my-skill/
+  skill.toml      # metadata and interfaces
+  prompt.md       # LLM-facing instructions
+  schema.json     # JSON Schema for tool input
+  src/main.rs     # your logic
+</code></div>
+        </div>
+
+        <div class="cta">
+            <a href="https://github.com/ZenMicro-Tech/skillforge">View on GitHub</a>
+            <p>Apache-2.0 &middot; Contributions welcome &middot; Report issues on GitHub</p>
+        </div>
+
+        <footer>
+            Built by <a href="https://github.com/ZenMicro-Tech">ZenMicro Tech</a>
+        </footer>
+    </div>
+</body>
+</html>
