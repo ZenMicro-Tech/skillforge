@@ -181,6 +181,66 @@ pub fn pull(reference: &str, out_dir: &Path) -> Result<PullResult> {
     })
 }
 
+/// List all tags in a repository. Used by the catalog "bucket of tags" pattern.
+pub fn list_tags(repository: &str) -> Result<Vec<String>> {
+    let reference = format!("{repository}:__unused__");
+    let parsed = parse_ref(&reference)?;
+    let auth = auth_for_pull();
+
+    block_on(async move {
+        let client = Client::new(ClientConfig::default());
+        let resp = client
+            .list_tags(&parsed, &auth, None, None)
+            .await
+            .context("listing tags")?;
+        Ok(resp.tags)
+    })
+}
+
+/// Fetch manifest-level annotations for a given reference.
+pub fn fetch_manifest_annotations(reference: &str) -> Result<BTreeMap<String, String>> {
+    let parsed = parse_ref(reference)?;
+    let auth = auth_for_pull();
+
+    block_on(async move {
+        let client = Client::new(ClientConfig::default());
+        let (manifest, _digest) = client
+            .pull_image_manifest(&parsed, &auth)
+            .await
+            .context("pull manifest for annotations")?;
+        Ok(manifest.annotations.unwrap_or_default())
+    })
+}
+
+/// Push a metadata-only manifest (no layers) with annotations to a catalog tag.
+/// Used by publish to register a skill in the catalog.
+pub fn push_catalog_entry(
+    reference: &str,
+    annotations: BTreeMap<String, String>,
+) -> Result<String> {
+    let parsed = parse_ref(reference)?;
+    let auth = auth_for_push(&parsed)?;
+
+    block_on(async move {
+        let client = Client::new(ClientConfig::default());
+        let config = Config::new(
+            Bytes::from_static(b"{}"),
+            EMPTY_CONFIG_MEDIA_TYPE.to_string(),
+            None,
+        );
+        let layers: Vec<ImageLayer> = vec![];
+        let mut manifest = OciImageManifest::build(&layers, &config, Some(annotations));
+        manifest.artifact_type = Some("application/vnd.skillforge.catalog-entry.v1+json".to_string());
+
+        let resp = client
+            .push(&parsed, &layers, config, &auth, Some(manifest))
+            .await
+            .context("push catalog entry")?;
+
+        Ok(resp.manifest_url)
+    })
+}
+
 fn parse_ref(s: &str) -> Result<Reference> {
     s.parse::<Reference>()
         .map_err(|e| anyhow!("invalid OCI reference {s:?}: {e}"))

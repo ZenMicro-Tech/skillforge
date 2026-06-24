@@ -94,6 +94,17 @@ enum Command {
         #[arg(long = "agent")]
         agents: Vec<String>,
     },
+    /// Search for available skills in a remote catalog registry.
+    Search {
+        /// Filter skills by name (substring match). Omit to list all.
+        query: Option<String>,
+        /// Show detailed info for a specific skill name.
+        #[arg(long)]
+        info: Option<String>,
+        /// OCI catalog repository to query. Defaults to the public skillforge catalog.
+        #[arg(long)]
+        registry: Option<String>,
+    },
     /// List installed skills, or show detail for a specific skill.
     List {
         /// Show detail (linked agents) for a specific skill directory.
@@ -142,6 +153,17 @@ fn main() -> Result<()> {
         }
         Command::Unlink { path, agents } => {
             commands::link::unlink(path.as_deref(), filter(&agents))
+        }
+        Command::Search {
+            query,
+            info,
+            registry,
+        } => {
+            if let Some(name) = info {
+                commands::search::search_detail(&name, registry.as_deref())
+            } else {
+                commands::search::search(query.as_deref(), registry.as_deref())
+            }
         }
         Command::List { path } => commands::link::list(path.as_deref()),
         Command::Mux { action } => match action {

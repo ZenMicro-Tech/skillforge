@@ -71,6 +71,9 @@ fn publish_single(
 
     eprintln!("✓ published {reference}");
     eprintln!("  manifest: {}", result.manifest_url);
+
+    push_catalog_entry_for(manifest, repo)?;
+
     Ok(())
 }
 
@@ -121,6 +124,9 @@ fn publish_multiarch(
 
     eprintln!("✓ published multi-arch manifest: {index_ref}");
     eprintln!("  index: {url}");
+
+    push_catalog_entry_for(manifest, repo)?;
+
     Ok(())
 }
 
@@ -234,4 +240,73 @@ fn platform_from_target(target: &str) -> String {
 /// platform strings per process lifetime.
 fn leak_str(s: String) -> &'static str {
     Box::leak(s.into_boxed_str())
+}
+
+/// Push a metadata-only catalog entry to the catalog repo adjacent to the skill repo.
+/// Tag convention: `{name}--{version}` in a sibling `catalog` repository.
+fn push_catalog_entry_for(manifest: &skillforge_core::Manifest, skill_repo: &str) -> Result<()> {
+    let catalog_repo = derive_catalog_repo(skill_repo);
+    let catalog_tag = format!("{}--{}", manifest.skill.name, manifest.skill.version);
+    let catalog_ref = format!("{catalog_repo}:{catalog_tag}");
+
+    let mut annotations = BTreeMap::new();
+    annotations.insert(
+        "org.opencontainers.image.title".to_string(),
+        manifest.skill.name.clone(),
+    );
+    annotations.insert(
+        "org.opencontainers.image.description".to_string(),
+        manifest.skill.description.clone(),
+    );
+    annotations.insert(
+        "org.opencontainers.image.version".to_string(),
+        manifest.skill.version.clone(),
+    );
+    if let Some(license) = &manifest.skill.license {
+        annotations.insert(
+            "org.opencontainers.image.licenses".to_string(),
+            license.clone(),
+        );
+    }
+
+    let interfaces: Vec<&str> = [
+        manifest.interfaces.mcp.then_some("mcp"),
+        manifest.interfaces.cli.then_some("cli"),
+        manifest.interfaces.http.then_some("http"),
+        manifest.interfaces.lib.then_some("lib"),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    annotations.insert(
+        "skillforge.skill.interfaces".to_string(),
+        interfaces.join(","),
+    );
+    annotations.insert("skillforge.skill.repo".to_string(), skill_repo.to_string());
+
+    eprintln!("registering in catalog: {catalog_ref}");
+    match oci::push_catalog_entry(&catalog_ref, annotations) {
+        Ok(_url) => {
+            eprintln!("✓ catalog updated");
+        }
+        Err(e) => {
+            eprintln!("⚠ catalog update failed (skill was published successfully): {e}");
+        }
+    }
+    Ok(())
+}
+
+/// Derive the catalog repository from a skill repository path.
+/// e.g. `ghcr.io/ZenMicro-Tech/skillforge/skills/word-count` → `ghcr.io/ZenMicro-Tech/skillforge/catalog`
+/// e.g. `ghcr.io/myorg/skills/foo` → `ghcr.io/myorg/catalog`
+fn derive_catalog_repo(skill_repo: &str) -> String {
+    // Find the "skills/" segment and replace everything from it with "catalog"
+    if let Some(idx) = skill_repo.find("/skills/") {
+        return format!("{}/catalog", &skill_repo[..idx]);
+    }
+    // Fallback: replace the last path segment with "catalog"
+    if let Some(idx) = skill_repo.rfind('/') {
+        return format!("{}/catalog", &skill_repo[..idx]);
+    }
+    format!("{skill_repo}/catalog")
 }
