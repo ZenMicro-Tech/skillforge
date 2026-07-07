@@ -228,7 +228,12 @@ pub fn push_catalog_entry(
             EMPTY_CONFIG_MEDIA_TYPE.to_string(),
             None,
         );
-        let layers: Vec<ImageLayer> = vec![];
+        let meta_json = serde_json::to_vec(&annotations).context("serialize catalog metadata")?;
+        let layers = vec![ImageLayer::new(
+            meta_json,
+            "application/vnd.skillforge.catalog-metadata.v1+json".to_string(),
+            None,
+        )];
         let mut manifest = OciImageManifest::build(&layers, &config, Some(annotations));
         manifest.artifact_type = Some("application/vnd.skillforge.catalog-entry.v1+json".to_string());
 
