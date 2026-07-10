@@ -24,3 +24,5 @@ oci-client      = { version = "0.17", default-features = false, features = ["rus
 oci-spec        = "0.9"
 tokio           = { version = "1", features = ["rt", "macros", "io-util", "fs"] }
 bytes           = "1"
+base64          = "0.22"
+dirs            = "6"

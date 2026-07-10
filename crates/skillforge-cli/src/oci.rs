@@ -144,7 +144,7 @@ pub struct PullResult {
 
 pub fn pull(reference: &str, out_dir: &Path) -> Result<PullResult> {
     let parsed = parse_ref(reference)?;
-    let auth = auth_for_pull();
+    let auth = auth_for_pull(&parsed);
     std::fs::create_dir_all(out_dir).with_context(|| format!("mkdir {}", out_dir.display()))?;
 
     let out_dir = out_dir.to_path_buf();
@@ -181,6 +181,71 @@ pub fn pull(reference: &str, out_dir: &Path) -> Result<PullResult> {
     })
 }
 
+/// List all tags in a repository. Used by the catalog "bucket of tags" pattern.
+pub fn list_tags(repository: &str) -> Result<Vec<String>> {
+    let reference = format!("{repository}:__unused__");
+    let parsed = parse_ref(&reference)?;
+    let auth = auth_for_pull(&parsed);
+
+    block_on(async move {
+        let client = Client::new(ClientConfig::default());
+        let resp = client
+            .list_tags(&parsed, &auth, None, None)
+            .await
+            .context("listing tags")?;
+        Ok(resp.tags)
+    })
+}
+
+/// Fetch manifest-level annotations for a given reference.
+pub fn fetch_manifest_annotations(reference: &str) -> Result<BTreeMap<String, String>> {
+    let parsed = parse_ref(reference)?;
+    let auth = auth_for_pull(&parsed);
+
+    block_on(async move {
+        let client = Client::new(ClientConfig::default());
+        let (manifest, _digest) = client
+            .pull_image_manifest(&parsed, &auth)
+            .await
+            .context("pull manifest for annotations")?;
+        Ok(manifest.annotations.unwrap_or_default())
+    })
+}
+
+/// Push a metadata-only manifest (no layers) with annotations to a catalog tag.
+/// Used by publish to register a skill in the catalog.
+pub fn push_catalog_entry(
+    reference: &str,
+    annotations: BTreeMap<String, String>,
+) -> Result<String> {
+    let parsed = parse_ref(reference)?;
+    let auth = auth_for_push(&parsed)?;
+
+    block_on(async move {
+        let client = Client::new(ClientConfig::default());
+        let config = Config::new(
+            Bytes::from_static(b"{}"),
+            EMPTY_CONFIG_MEDIA_TYPE.to_string(),
+            None,
+        );
+        let meta_json = serde_json::to_vec(&annotations).context("serialize catalog metadata")?;
+        let layers = vec![ImageLayer::new(
+            meta_json,
+            "application/vnd.skillforge.catalog-metadata.v1+json".to_string(),
+            None,
+        )];
+        let mut manifest = OciImageManifest::build(&layers, &config, Some(annotations));
+        manifest.artifact_type = Some("application/vnd.skillforge.catalog-entry.v1+json".to_string());
+
+        let resp = client
+            .push(&parsed, &layers, config, &auth, Some(manifest))
+            .await
+            .context("push catalog entry")?;
+
+        Ok(resp.manifest_url)
+    })
+}
+
 fn parse_ref(s: &str) -> Result<Reference> {
     s.parse::<Reference>()
         .map_err(|e| anyhow!("invalid OCI reference {s:?}: {e}"))
@@ -202,10 +267,19 @@ fn read_layers(files: &[PushFile<'_>]) -> Result<Vec<ImageLayer>> {
     Ok(layers)
 }
 
-/// Anonymous read works for public GHCR packages. Private packages will return
-/// a clear unauthorized error and the user can set `GH_TOKEN` or run `gh auth
-/// login`.
-fn auth_for_pull() -> RegistryAuth {
+// ---------------------------------------------------------------------------
+// Authentication
+//
+// Resolution order:
+//   1. Docker config (~/.docker/config.json): credHelpers, credsStore, auths
+//   2. GitHub-specific: GH_TOKEN / GITHUB_TOKEN env vars, `gh auth token`
+//   3. Anonymous
+// ---------------------------------------------------------------------------
+
+fn auth_for_pull(reference: &Reference) -> RegistryAuth {
+    if let Some(auth) = docker_auth_for(reference.registry()) {
+        return auth;
+    }
     if let Some(token) = github_token() {
         return RegistryAuth::Basic(github_username().unwrap_or_default(), token);
     }
@@ -213,6 +287,9 @@ fn auth_for_pull() -> RegistryAuth {
 }
 
 fn auth_for_push(reference: &Reference) -> Result<RegistryAuth> {
+    if let Some(auth) = docker_auth_for(reference.registry()) {
+        return Ok(auth);
+    }
     if reference.registry().contains("ghcr.io") {
         let user = github_username().ok_or_else(|| {
             anyhow!(
@@ -231,6 +308,127 @@ fn auth_for_push(reference: &Reference) -> Result<RegistryAuth> {
     }
     Ok(RegistryAuth::Anonymous)
 }
+
+// ---------------------------------------------------------------------------
+// Docker config credential resolution
+// ---------------------------------------------------------------------------
+
+fn docker_auth_for(registry: &str) -> Option<RegistryAuth> {
+    let config = load_docker_config()?;
+
+    // 1. Per-registry credential helper (credHelpers)
+    if let Some(helpers) = config.cred_helpers.as_ref() {
+        if let Some(helper) = helpers.get(registry) {
+            return cred_helper_get(helper, registry);
+        }
+    }
+
+    // 2. Default credential store (credsStore)
+    if let Some(store) = config.creds_store.as_deref() {
+        if let Some(auth) = cred_helper_get(store, registry) {
+            return Some(auth);
+        }
+    }
+
+    // 3. Static auths (base64-encoded user:pass or token)
+    if let Some(auths) = config.auths.as_ref() {
+        let entry = auths.get(registry).or_else(|| {
+            // Docker sometimes stores keys as https://<registry>/v1/ or similar
+            auths.iter().find_map(|(k, v)| {
+                if k.contains(registry) { Some(v) } else { None }
+            })
+        })?;
+        return auth_from_docker_entry(entry);
+    }
+
+    None
+}
+
+#[derive(serde::Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct DockerConfig {
+    auths: Option<std::collections::HashMap<String, DockerAuthEntry>>,
+    creds_store: Option<String>,
+    cred_helpers: Option<std::collections::HashMap<String, String>>,
+}
+
+#[derive(serde::Deserialize, Default)]
+struct DockerAuthEntry {
+    auth: Option<String>,
+    username: Option<String>,
+    password: Option<String>,
+}
+
+fn load_docker_config() -> Option<DockerConfig> {
+    let dir = std::env::var("DOCKER_CONFIG")
+        .map(std::path::PathBuf::from)
+        .ok()
+        .or_else(|| dirs::home_dir().map(|h| h.join(".docker")))?;
+    let data = std::fs::read_to_string(dir.join("config.json")).ok()?;
+    serde_json::from_str(&data).ok()
+}
+
+fn auth_from_docker_entry(entry: &DockerAuthEntry) -> Option<RegistryAuth> {
+    // Explicit username/password fields
+    if let (Some(user), Some(pass)) = (entry.username.as_deref(), entry.password.as_deref()) {
+        if !user.is_empty() {
+            return Some(RegistryAuth::Basic(user.to_string(), pass.to_string()));
+        }
+    }
+    // Base64-encoded "user:pass" in the `auth` field
+    if let Some(encoded) = entry.auth.as_deref() {
+        use base64::Engine;
+        let decoded = base64::engine::general_purpose::STANDARD.decode(encoded).ok()?;
+        let decoded = String::from_utf8(decoded).ok()?;
+        let (user, pass) = decoded.split_once(':')?;
+        if !user.is_empty() {
+            return Some(RegistryAuth::Basic(user.to_string(), pass.to_string()));
+        }
+    }
+    None
+}
+
+/// Invoke a Docker credential helper (docker-credential-<helper>) and parse its
+/// JSON output for the given registry.
+fn cred_helper_get(helper: &str, registry: &str) -> Option<RegistryAuth> {
+    use std::io::Write;
+
+    let prog = format!("docker-credential-{helper}");
+    let mut child = std::process::Command::new(&prog)
+        .arg("get")
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .ok()?;
+
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin.write_all(registry.as_bytes()).ok()?;
+    }
+
+    let output = child.wait_with_output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+
+    let cred: CredHelperOutput = serde_json::from_slice(&output.stdout).ok()?;
+    if cred.username.is_empty() {
+        return None;
+    }
+    Some(RegistryAuth::Basic(cred.username, cred.secret))
+}
+
+#[derive(serde::Deserialize, Default)]
+struct CredHelperOutput {
+    #[serde(default, alias = "Username")]
+    username: String,
+    #[serde(default, alias = "Secret")]
+    secret: String,
+}
+
+// ---------------------------------------------------------------------------
+// GitHub-specific fallback (GH_TOKEN, GITHUB_TOKEN, gh CLI)
+// ---------------------------------------------------------------------------
 
 fn github_token() -> Option<String> {
     if let Ok(t) = std::env::var("GH_TOKEN") {

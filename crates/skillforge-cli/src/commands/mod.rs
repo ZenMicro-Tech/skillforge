@@ -6,6 +6,7 @@ pub mod mux;
 pub mod new;
 pub mod publish;
 pub mod pull;
+pub mod search;
 
 use anyhow::{Context, Result};
 use skillforge_core::Manifest;
