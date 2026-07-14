@@ -2,7 +2,7 @@
 //! the "bucket of tags" pattern.
 //!
 //! Each published skill writes a metadata-only manifest to a well-known catalog
-//! repository (e.g. `ghcr.io/ZenMicro-Tech/skillforge/catalog`) using a tag
+//! repository (e.g. `ghcr.io/ZenMicro-Tech/skillforge/skills/catalog`) using a tag
 //! convention: `{name}--{version}`. Discovery is a tag list + per-tag manifest
 //! annotation read.
 
@@ -11,7 +11,7 @@ use std::collections::BTreeMap;
 
 use crate::oci;
 
-const DEFAULT_CATALOG: &str = "ghcr.io/zenmicro-tech/skillforge/catalog";
+const DEFAULT_CATALOG: &str = "ghcr.io/zenmicro-tech/skillforge/skills/catalog";
 
 pub fn search(query: Option<&str>, registry: Option<&str>) -> Result<()> {
     let catalog = registry.unwrap_or(DEFAULT_CATALOG);
