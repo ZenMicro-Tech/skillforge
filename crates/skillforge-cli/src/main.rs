@@ -32,9 +32,9 @@ enum Command {
     /// Publish a skill to an OCI registry (via ORAS).
     Publish {
         name: String,
-        /// Override the `[publish].repo` from skill.toml.
+        /// Override the `[publish].registry` from skill.toml.
         #[arg(long)]
-        repo: Option<String>,
+        registry: Option<String>,
         /// Path to skill directory (overrides name-based resolution).
         #[arg(long)]
         path: Option<String>,
@@ -138,10 +138,10 @@ fn main() -> Result<()> {
         Command::Remove { name } => commands::add::remove(&name),
         Command::Publish {
             name,
-            repo,
+            registry,
             path,
             target,
-        } => commands::publish::publish(&name, repo.as_deref(), path.as_deref(), &target),
+        } => commands::publish::publish(&name, registry.as_deref(), path.as_deref(), &target),
         Command::New { name, path } => commands::new::run(&name, path.as_deref()),
         Command::Build { path } => commands::build::run(path.as_deref()),
         Command::Run { path, args } => commands::delegate::run(path.as_deref(), "run", &args),
