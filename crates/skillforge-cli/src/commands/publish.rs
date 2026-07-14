@@ -7,7 +7,7 @@ use crate::sources;
 
 pub fn publish(
     name: &str,
-    registry_override: Option<&str>,
+    repo_override: Option<&str>,
     path: Option<&str>,
     targets: &[String],
 ) -> Result<()> {
@@ -17,38 +17,37 @@ pub fn publish(
     };
     let manifest = skillforge_core::Manifest::from_path(dir.join("skill.toml"))?;
 
-    let registry = match registry_override {
+    let repo = match repo_override {
         Some(r) => r.to_string(),
         None => manifest
             .publish
             .as_ref()
-            .map(|p| p.registry.clone())
+            .map(|p| p.repo.clone())
             .ok_or_else(|| {
                 anyhow!(
-                    "no `[publish]` section in skill.toml and no --registry override provided.\n\
-                     Add to skill.toml:\n  [publish]\n  registry = \"ghcr.io/<owner>/skills\"",
+                    "no `[publish]` section in skill.toml and no --repo override provided.\n\
+                     Add to skill.toml:\n  [publish]\n  repo = \"ghcr.io/<owner>/skills/{}\"",
+                    manifest.skill.name
                 )
             })?,
     };
 
-    let repo = format!("{}/{}", registry, manifest.skill.name);
     let tag = &manifest.skill.version;
 
     if targets.is_empty() {
-        return publish_single(&dir, &manifest, &registry, &repo, tag, None);
+        return publish_single(&dir, &manifest, &repo, tag, None);
     }
 
     if targets.len() == 1 {
-        return publish_single(&dir, &manifest, &registry, &repo, tag, Some(&targets[0]));
+        return publish_single(&dir, &manifest, &repo, tag, Some(&targets[0]));
     }
 
-    publish_multiarch(&dir, &manifest, &registry, &repo, tag, targets)
+    publish_multiarch(&dir, &manifest, &repo, tag, targets)
 }
 
 fn publish_single(
     dir: &PathBuf,
     manifest: &skillforge_core::Manifest,
-    registry: &str,
     repo: &str,
     tag: &str,
     target: Option<&str>,
@@ -73,7 +72,7 @@ fn publish_single(
     eprintln!("✓ published {reference}");
     eprintln!("  manifest: {}", result.manifest_url);
 
-    push_catalog_entry_for(manifest, registry, repo)?;
+    push_catalog_entry_for(manifest, repo)?;
 
     Ok(())
 }
@@ -81,7 +80,6 @@ fn publish_single(
 fn publish_multiarch(
     dir: &PathBuf,
     manifest: &skillforge_core::Manifest,
-    registry: &str,
     repo: &str,
     tag: &str,
     targets: &[String],
@@ -127,7 +125,7 @@ fn publish_multiarch(
     eprintln!("✓ published multi-arch manifest: {index_ref}");
     eprintln!("  index: {url}");
 
-    push_catalog_entry_for(manifest, registry, repo)?;
+    push_catalog_entry_for(manifest, repo)?;
 
     Ok(())
 }
@@ -244,12 +242,10 @@ fn leak_str(s: String) -> &'static str {
     Box::leak(s.into_boxed_str())
 }
 
-fn push_catalog_entry_for(
-    manifest: &skillforge_core::Manifest,
-    registry: &str,
-    skill_repo: &str,
-) -> Result<()> {
-    let catalog_repo = format!("{registry}/catalog");
+/// Push a metadata-only catalog entry to the catalog repo adjacent to the skill repo.
+/// Tag convention: `{name}--{version}` in a sibling `catalog` repository.
+fn push_catalog_entry_for(manifest: &skillforge_core::Manifest, skill_repo: &str) -> Result<()> {
+    let catalog_repo = derive_catalog_repo(skill_repo);
     let catalog_tag = format!("{}--{}", manifest.skill.name, manifest.skill.version);
     let catalog_ref = format!("{catalog_repo}:{catalog_tag}");
 
@@ -298,4 +294,19 @@ fn push_catalog_entry_for(
         }
     }
     Ok(())
+}
+
+/// Derive the catalog repository from a skill repository path.
+/// e.g. `ghcr.io/ZenMicro-Tech/skillforge/skills/word-count` → `ghcr.io/ZenMicro-Tech/skillforge/catalog`
+/// e.g. `ghcr.io/myorg/skills/foo` → `ghcr.io/myorg/catalog`
+fn derive_catalog_repo(skill_repo: &str) -> String {
+    // Find the "skills/" segment and replace everything from it with "catalog"
+    if let Some(idx) = skill_repo.find("/skills/") {
+        return format!("{}/catalog", &skill_repo[..idx]);
+    }
+    // Fallback: replace the last path segment with "catalog"
+    if let Some(idx) = skill_repo.rfind('/') {
+        return format!("{}/catalog", &skill_repo[..idx]);
+    }
+    format!("{skill_repo}/catalog")
 }

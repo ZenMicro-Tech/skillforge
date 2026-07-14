@@ -29,9 +29,8 @@ pub struct Manifest {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Publish {
-    /// OCI registry namespace, e.g. "ghcr.io/owner/skills".
-    /// The skill name is appended automatically: {registry}/{name}:{version}.
-    pub registry: String,
+    /// OCI repository, e.g. "ghcr.io/owner/skills/<name>".
+    pub repo: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
