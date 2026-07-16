@@ -3,3 +3,6 @@ Cargo.lock.bak
 **/*.rs.bk
 .DS_Store
 .test-home/
+
+skills
+examples

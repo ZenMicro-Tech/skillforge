@@ -42,6 +42,11 @@ enum Command {
         /// e.g. --target aarch64-apple-darwin --target x86_64-unknown-linux-gnu
         #[arg(long)]
         target: Vec<String>,
+        /// Skip building; create only the multi-arch OCI image index from
+        /// per-platform manifests that were already pushed. Requires --target
+        /// for each platform that was previously published.
+        #[arg(long)]
+        create_index: bool,
     },
     /// Scaffold a new skill directory from the rust-skill template.
     New {
@@ -141,7 +146,14 @@ fn main() -> Result<()> {
             registry,
             path,
             target,
-        } => commands::publish::publish(&name, registry.as_deref(), path.as_deref(), &target),
+            create_index,
+        } => commands::publish::publish(
+            &name,
+            registry.as_deref(),
+            path.as_deref(),
+            &target,
+            create_index,
+        ),
         Command::New { name, path } => commands::new::run(&name, path.as_deref()),
         Command::Build { path } => commands::build::run(path.as_deref()),
         Command::Run { path, args } => commands::delegate::run(path.as_deref(), "run", &args),

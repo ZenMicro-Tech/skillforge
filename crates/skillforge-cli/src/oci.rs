@@ -138,6 +138,26 @@ fn os_from_str(s: &str) -> Os {
 }
 
 
+pub struct ManifestInfo {
+    pub digest: String,
+    pub size: i64,
+}
+
+pub fn fetch_manifest_info(reference: &str) -> Result<ManifestInfo> {
+    let parsed = parse_ref(reference)?;
+    let auth = auth_for_pull(&parsed);
+
+    block_on(async move {
+        let client = Client::new(ClientConfig::default());
+        let (manifest, digest) = client
+            .pull_image_manifest(&parsed, &auth)
+            .await
+            .with_context(|| format!("fetching manifest for {reference}"))?;
+        let size = serde_json::to_vec(&manifest)?.len() as i64;
+        Ok(ManifestInfo { digest, size })
+    })
+}
+
 pub struct PullResult {
     pub manifest_digest: String,
 }

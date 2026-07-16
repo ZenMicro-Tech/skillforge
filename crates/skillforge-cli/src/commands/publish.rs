@@ -10,6 +10,7 @@ pub fn publish(
     registry_override: Option<&str>,
     path: Option<&str>,
     targets: &[String],
+    create_index: bool,
 ) -> Result<()> {
     let dir = match path {
         Some(p) => PathBuf::from(p),
@@ -33,6 +34,13 @@ pub fn publish(
 
     let repo = format!("{}/{}", registry, manifest.skill.name);
     let tag = &manifest.skill.version;
+
+    if create_index {
+        if targets.len() < 2 {
+            bail!("--create-index requires at least two --target flags");
+        }
+        return publish_index_only(&manifest, &registry, &repo, tag, targets);
+    }
 
     if targets.is_empty() {
         return publish_single(&dir, &manifest, &registry, &repo, tag, None);
@@ -114,6 +122,53 @@ fn publish_multiarch(
         index_entries.push(IndexEntry {
             digest: result.manifest_digest,
             size: result.manifest_size,
+            os: leak_str(os),
+            arch: leak_str(arch),
+        });
+    }
+
+    let index_ref = format!("{repo}:{tag}");
+    eprintln!("\npushing image index as {index_ref}...");
+    let url = oci::push_index(&index_ref, &index_entries)
+        .with_context(|| format!("pushing image index to {index_ref}"))?;
+
+    eprintln!("✓ published multi-arch manifest: {index_ref}");
+    eprintln!("  index: {url}");
+
+    push_catalog_entry_for(manifest, registry, repo)?;
+
+    Ok(())
+}
+
+fn publish_index_only(
+    manifest: &skillforge_core::Manifest,
+    registry: &str,
+    repo: &str,
+    tag: &str,
+    targets: &[String],
+) -> Result<()> {
+    eprintln!(
+        "creating multi-arch index for {}:{} on {repo}",
+        manifest.skill.name, tag
+    );
+
+    let mut index_entries: Vec<oci::IndexEntry> = Vec::new();
+
+    for target in targets {
+        let (os, arch) = parse_rust_target(target)?;
+        let platform_tag = format!("{tag}-{os}-{arch}");
+        let reference = format!("{repo}:{platform_tag}");
+
+        eprintln!("  resolving {reference}...");
+        let info = oci::fetch_manifest_info(&reference)
+            .with_context(|| format!("could not find previously-pushed manifest for {target}.\n\
+                Ensure `skillforge publish {name} --target {target}` was run first.",
+                name = manifest.skill.name))?;
+
+        eprintln!("  ✓ {platform_tag} → {}", info.digest);
+        index_entries.push(oci::IndexEntry {
+            digest: info.digest,
+            size: info.size,
             os: leak_str(os),
             arch: leak_str(arch),
         });
@@ -220,9 +275,11 @@ fn parse_rust_target(target: &str) -> Result<(String, String)> {
 }
 
 fn current_platform() -> String {
-    let os = std::env::consts::OS;
-    let arch = std::env::consts::ARCH;
-    let arch = match arch {
+    let os = match std::env::consts::OS {
+        "macos" => "darwin",
+        o => o,
+    };
+    let arch = match std::env::consts::ARCH {
         "aarch64" => "arm64",
         "x86_64" => "amd64",
         a => a,
