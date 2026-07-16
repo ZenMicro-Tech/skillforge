@@ -21,6 +21,7 @@ pub fn fetch_oci(reference: &str) -> Result<PathBuf> {
     std::fs::create_dir_all(&stage)?;
 
     eprintln!("pulling {reference}");
+    check_platform_match(reference)?;
     let result = oci::pull(reference, &stage)?;
     eprintln!("  manifest digest: {}", result.manifest_digest);
 
@@ -85,4 +86,37 @@ fn chmod_executable(path: &PathBuf) -> Result<()> {
 #[cfg(not(unix))]
 fn chmod_executable(_path: &PathBuf) -> Result<()> {
     Ok(())
+}
+
+fn check_platform_match(reference: &str) -> Result<()> {
+    let annotations = match oci::fetch_manifest_annotations(reference) {
+        Ok(a) => a,
+        Err(_) => return Ok(()),
+    };
+    let Some(skill_platform) = annotations.get("skillforge.skill.platform") else {
+        return Ok(());
+    };
+    let host = current_platform();
+    if *skill_platform != host {
+        bail!(
+            "platform mismatch: skill was built for {skill_platform}, \
+             but this machine is {host}.\n\
+             Check if a {host} build is available with: \
+             skillforge search --info <name>"
+        );
+    }
+    Ok(())
+}
+
+fn current_platform() -> String {
+    let os = match std::env::consts::OS {
+        "macos" => "darwin",
+        o => o,
+    };
+    let arch = match std::env::consts::ARCH {
+        "aarch64" => "arm64",
+        "x86_64" => "amd64",
+        a => a,
+    };
+    format!("{os}-{arch}")
 }
