@@ -138,6 +138,31 @@ fn os_from_str(s: &str) -> Os {
 }
 
 
+/// Re-tag an existing manifest under a new reference (e.g. push a `:latest` alias).
+/// Works for both single-platform manifests and image indexes.
+pub fn retag(source: &str, destination: &str) -> Result<()> {
+    let src = parse_ref(source)?;
+    let dst = parse_ref(destination)?;
+    let pull_auth = auth_for_pull(&src);
+    let push_auth = auth_for_push(&dst)?;
+
+    block_on(async move {
+        let client = Client::new(ClientConfig::default());
+        let (manifest, _digest) = client
+            .pull_manifest(&src, &pull_auth)
+            .await
+            .with_context(|| format!("pulling manifest from {source}"))?;
+        client
+            .store_auth_if_needed(dst.resolve_registry(), &push_auth)
+            .await;
+        client
+            .push_manifest(&dst, &manifest)
+            .await
+            .with_context(|| format!("pushing manifest to {destination}"))?;
+        Ok(())
+    })
+}
+
 pub struct ManifestInfo {
     pub digest: String,
     pub size: i64,
