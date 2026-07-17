@@ -70,7 +70,13 @@ fn publish_single(
         Some(t) => platform_from_target(t),
         None => current_platform(),
     };
-    let reference = format!("{repo}:{tag}");
+
+    // Explicit --target → platform-specific tag (for later --create-index stitching).
+    // No target → bare version tag (single-platform publish).
+    let reference = match target {
+        Some(_) => format!("{repo}:{tag}-{platform}"),
+        None => format!("{repo}:{tag}"),
+    };
 
     eprintln!("publishing {}:{} to {repo}", manifest.skill.name, tag);
     eprintln!("  platform: {platform}");
@@ -80,6 +86,15 @@ fn publish_single(
 
     eprintln!("✓ published {reference}");
     eprintln!("  manifest: {}", result.manifest_url);
+
+    // Tag as :latest for non-platform-specific publishes
+    if target.is_none() {
+        let latest_ref = format!("{repo}:latest");
+        eprintln!("  tagging {latest_ref}...");
+        oci::retag(&reference, &latest_ref)
+            .with_context(|| format!("tagging {latest_ref}"))?;
+        eprintln!("  ✓ latest");
+    }
 
     push_catalog_entry_for(manifest, registry, repo)?;
 
@@ -135,6 +150,12 @@ fn publish_multiarch(
     eprintln!("✓ published multi-arch manifest: {index_ref}");
     eprintln!("  index: {url}");
 
+    let latest_ref = format!("{repo}:latest");
+    eprintln!("  tagging {latest_ref}...");
+    oci::retag(&index_ref, &latest_ref)
+        .with_context(|| format!("tagging {latest_ref}"))?;
+    eprintln!("  ✓ latest");
+
     push_catalog_entry_for(manifest, registry, repo)?;
 
     Ok(())
@@ -181,6 +202,12 @@ fn publish_index_only(
 
     eprintln!("✓ published multi-arch manifest: {index_ref}");
     eprintln!("  index: {url}");
+
+    let latest_ref = format!("{repo}:latest");
+    eprintln!("  tagging {latest_ref}...");
+    oci::retag(&index_ref, &latest_ref)
+        .with_context(|| format!("tagging {latest_ref}"))?;
+    eprintln!("  ✓ latest");
 
     push_catalog_entry_for(manifest, registry, repo)?;
 
