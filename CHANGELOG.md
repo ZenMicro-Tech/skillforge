@@ -4,11 +4,22 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
-## [0.1.6] - 2026-07-15
+## [0.1.7] - 2026-07-16
 
 ### Added
 
 - `--create-index` flag on `skillforge publish` to create a multi-arch OCI image index from previously-pushed per-platform manifests without rebuilding.
+- Automatic `:latest` tag pushed alongside versioned tags on publish.
+
+### Fixed
+
+- `skillforge publish --target <triple>` now pushes to a platform-specific tag (e.g. `:0.1.0-darwin-arm64`) instead of the bare version tag, so parallel CI runners no longer overwrite each other.
+
+## [0.1.6] - 2026-07-15
+
+### Changed
+
+- Version bump (no user-facing changes).
 
 ## [0.1.5] - 2026-07-13
 
@@ -65,7 +76,8 @@ All notable changes to this project will be documented in this file.
 - Skill scaffolding (`skillforge new`), build, run, and link/unlink commands.
 - MCP stdio server mode (`skillforge tool`).
 
-[Unreleased]: https://github.com/ZenMicro-Tech/ai-skills-platform/compare/v0.1.6...HEAD
+[Unreleased]: https://github.com/ZenMicro-Tech/ai-skills-platform/compare/v0.1.7...HEAD
+[0.1.7]: https://github.com/ZenMicro-Tech/ai-skills-platform/compare/v0.1.6...v0.1.7
 [0.1.6]: https://github.com/ZenMicro-Tech/ai-skills-platform/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/ZenMicro-Tech/ai-skills-platform/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/ZenMicro-Tech/ai-skills-platform/compare/v0.1.3...v0.1.4
