@@ -194,7 +194,7 @@ pub fn pull(reference: &str, out_dir: &Path) -> Result<PullResult> {
 
     let out_dir = out_dir.to_path_buf();
     block_on(async move {
-        let client = Client::new(ClientConfig::default());
+        let client = Client::new(client_config_for_pull());
         let (manifest, manifest_digest) = client
             .pull_image_manifest(&parsed, &auth)
             .await
@@ -248,7 +248,7 @@ pub fn fetch_manifest_annotations(reference: &str) -> Result<BTreeMap<String, St
     let auth = auth_for_pull(&parsed);
 
     block_on(async move {
-        let client = Client::new(ClientConfig::default());
+        let client = Client::new(client_config_for_pull());
         let (manifest, _digest) = client
             .pull_image_manifest(&parsed, &auth)
             .await
@@ -289,6 +289,33 @@ pub fn push_catalog_entry(
 
         Ok(resp.manifest_url)
     })
+}
+
+fn client_config_for_pull() -> ClientConfig {
+    ClientConfig {
+        platform_resolver: Some(Box::new(skillforge_platform_resolver)),
+        ..Default::default()
+    }
+}
+
+fn skillforge_platform_resolver(manifests: &[ImageIndexEntry]) -> Option<String> {
+    let host_os = match std::env::consts::OS {
+        "macos" => Os::Darwin,
+        _ => Os::from(std::env::consts::OS),
+    };
+    let host_arch = Arch::from(match std::env::consts::ARCH {
+        "x86_64" => "amd64",
+        "aarch64" => "arm64",
+        a => a,
+    });
+    manifests
+        .iter()
+        .find(|entry| {
+            entry.platform.as_ref().is_some_and(|p| {
+                p.os == host_os && p.architecture == host_arch
+            })
+        })
+        .map(|entry| entry.digest.clone())
 }
 
 fn parse_ref(s: &str) -> Result<Reference> {
