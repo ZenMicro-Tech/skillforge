@@ -11,6 +11,7 @@ pub mod claude_desktop;
 pub mod copilot;
 pub mod cursor;
 pub mod generic;
+pub mod vscode;
 pub mod windsurf;
 
 pub struct SkillRef<'a> {
@@ -48,6 +49,7 @@ pub fn all() -> Vec<Box<dyn Agent>> {
         Box::new(claude_desktop::ClaudeDesktop),
         Box::new(copilot::Copilot),
         Box::new(cursor::Cursor),
+        Box::new(vscode::VSCode),
         Box::new(windsurf::Windsurf),
         Box::new(generic::Generic),
     ]

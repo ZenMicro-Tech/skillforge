@@ -121,6 +121,14 @@ enum Command {
         #[command(subcommand)]
         action: MuxAction,
     },
+    /// Check for newer versions of installed skills and upgrade them.
+    Upgrade {
+        /// Only check for updates, don't install them.
+        #[arg(long, short)]
+        check: bool,
+        /// Upgrade a specific skill by name. Omit to upgrade all.
+        name: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -184,6 +192,9 @@ fn main() -> Result<()> {
             MuxAction::Status => commands::mux::status(),
             MuxAction::Serve => commands::mux::serve(),
         },
+        Command::Upgrade { name, check } => {
+            commands::upgrade::upgrade(name.as_deref(), check)
+        }
     }
 }
 
