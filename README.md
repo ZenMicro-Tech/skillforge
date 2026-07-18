@@ -154,6 +154,27 @@ See [`examples/s3-agent`](examples/s3-agent/) for a Dockerized example that pull
 | `skillforge tool [--path]` | Run a skill as an MCP stdio server |
 | `skillforge describe [--path]` | Print embedded manifest, prompt, and schema |
 | `skillforge mux enable\|disable\|status` | Toggle the single-server aggregator |
+| `skillforge upgrade [name] [--check]` | Check for and apply newer versions of installed skills |
+
+## Upgrading skills
+
+Check for available updates:
+
+```sh
+skillforge upgrade --check          # check all installed skills
+skillforge upgrade --check my-skill # check a specific skill
+```
+
+Apply upgrades:
+
+```sh
+skillforge upgrade                  # upgrade all installed skills
+skillforge upgrade my-skill         # upgrade a specific skill
+```
+
+The `upgrade` command queries the OCI catalog for newer versions, pulls the latest artifact, rebuilds, and re-links — all without touching your existing install until the new version is ready.
+
+> **Note on `add` idempotency:** Running `skillforge add` for an already-installed skill is safe — the linking step deduplicates across all adapters and will skip with "already linked." However, the command is not fully idempotent: it will re-fetch OCI artifacts (deleting the existing install first), re-build, and re-register on every invocation. If a re-run fails mid-way (e.g., network error), a previously working OCI install may be lost. Use `skillforge upgrade` to safely update to a newer version.
 
 ## Mux mode
 
