@@ -155,7 +155,7 @@ See [`examples/s3-agent`](examples/s3-agent/) for a Dockerized example that pull
 |---|---|
 | `skillforge new <name>` | Scaffold a new skill directory |
 | `skillforge add <name-or-ref>...` | Resolve one or more skills (locally or via OCI), build, register, link |
-| `skillforge remove <name>` | Unlink and remove from registry |
+| `skillforge remove <name>...` | Unlink and remove one or more skills from the registry |
 | `skillforge publish <name> [--repo R]` | Push to OCI registry via ORAS |
 | `skillforge build [--path]` | Build without installing |
 | `skillforge run [--path] -- --input '...'` | Invoke a skill's deterministic CLI mode |

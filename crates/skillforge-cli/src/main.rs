@@ -26,9 +26,10 @@ enum Command {
         #[arg(required = true, num_args = 1..)]
         name_or_refs: Vec<String>,
     },
-    /// Remove a skill from every detected agent.
+    /// Remove one or more skills from every detected agent.
     Remove {
-        name: String,
+        #[arg(required = true, num_args = 1..)]
+        names: Vec<String>,
     },
     /// Publish a skill to an OCI registry (via ORAS).
     Publish {
@@ -149,7 +150,7 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
         Command::Add { name_or_refs } => commands::add::add_all(&name_or_refs),
-        Command::Remove { name } => commands::add::remove(&name),
+        Command::Remove { names } => commands::add::remove_all(&names),
         Command::Publish {
             name,
             registry,
