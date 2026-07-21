@@ -83,6 +83,14 @@ skillforge add my-skill
 
 This compiles the skill, registers it with every detected agent (Claude Code, Claude Desktop, Cursor), and you're done. Open a new agent session and the skill appears as a tool.
 
+Install several skills in one command by listing each local name or OCI reference:
+
+```sh
+skillforge add git github ghcr.io/yourname/skills/aws-s3:0.1.0
+```
+
+Skills are processed in the order supplied. The command stops at the first failed installation and reports which skill failed.
+
 ### 4. Use it
 
 ```sh
@@ -146,14 +154,35 @@ See [`examples/s3-agent`](examples/s3-agent/) for a Dockerized example that pull
 | Command | What it does |
 |---|---|
 | `skillforge new <name>` | Scaffold a new skill directory |
-| `skillforge add <name-or-ref>` | Resolve (locally or via OCI), build, register, link |
-| `skillforge remove <name>` | Unlink and remove from registry |
+| `skillforge add <name-or-ref>...` | Resolve one or more skills (locally or via OCI), build, register, link |
+| `skillforge remove <name>...` | Unlink and remove one or more skills from the registry |
 | `skillforge publish <name> [--repo R]` | Push to OCI registry via ORAS |
 | `skillforge build [--path]` | Build without installing |
 | `skillforge run [--path] -- --input '...'` | Invoke a skill's deterministic CLI mode |
 | `skillforge tool [--path]` | Run a skill as an MCP stdio server |
 | `skillforge describe [--path]` | Print embedded manifest, prompt, and schema |
 | `skillforge mux enable\|disable\|status` | Toggle the single-server aggregator |
+| `skillforge upgrade [name] [--check]` | Check for and apply newer versions of installed skills |
+
+## Upgrading skills
+
+Check for available updates:
+
+```sh
+skillforge upgrade --check          # check all installed skills
+skillforge upgrade --check my-skill # check a specific skill
+```
+
+Apply upgrades:
+
+```sh
+skillforge upgrade                  # upgrade all installed skills
+skillforge upgrade my-skill         # upgrade a specific skill
+```
+
+The `upgrade` command queries the OCI catalog for newer versions, pulls the latest artifact, rebuilds, and re-links — all without touching your existing install until the new version is ready.
+
+> **Note on `add` idempotency:** Running `skillforge add` for an already-installed skill is safe — the linking step deduplicates across all adapters and will skip with "already linked." However, the command is not fully idempotent: it will re-fetch OCI artifacts (deleting the existing install first), re-build, and re-register on every invocation. If a re-run fails mid-way (e.g., network error), a previously working OCI install may be lost. Use `skillforge upgrade` to safely update to a newer version.
 
 ## Mux mode
 

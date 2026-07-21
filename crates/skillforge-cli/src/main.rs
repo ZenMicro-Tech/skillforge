@@ -16,18 +16,20 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Build and install a skill into every detected agent.
+    /// Build and install one or more skills into every detected agent.
     ///
-    /// Accepts either a local skill name (resolved from `./skills/<name>` or
-    /// `~/.skillforge/skills/<name>`) or an OCI reference (e.g.
+    /// Each argument may be a local skill name (resolved from `./skills/<name>`
+    /// or `~/.skillforge/skills/<name>`) or an OCI reference (e.g.
     /// `ghcr.io/owner/skills/example-skill:0.1.0`). OCI refs are detected by
     /// the presence of `:` or `/`.
     Add {
-        name_or_ref: String,
+        #[arg(required = true, num_args = 1..)]
+        name_or_refs: Vec<String>,
     },
-    /// Remove a skill from every detected agent.
+    /// Remove one or more skills from every detected agent.
     Remove {
-        name: String,
+        #[arg(required = true, num_args = 1..)]
+        names: Vec<String>,
     },
     /// Publish a skill to an OCI registry (via ORAS).
     Publish {
@@ -121,6 +123,14 @@ enum Command {
         #[command(subcommand)]
         action: MuxAction,
     },
+    /// Check for newer versions of installed skills and upgrade them.
+    Upgrade {
+        /// Only check for updates, don't install them.
+        #[arg(long, short)]
+        check: bool,
+        /// Upgrade a specific skill by name. Omit to upgrade all.
+        name: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -139,8 +149,8 @@ enum MuxAction {
 fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
-        Command::Add { name_or_ref } => commands::add::add(&name_or_ref),
-        Command::Remove { name } => commands::add::remove(&name),
+        Command::Add { name_or_refs } => commands::add::add_all(&name_or_refs),
+        Command::Remove { names } => commands::add::remove_all(&names),
         Command::Publish {
             name,
             registry,
@@ -184,6 +194,9 @@ fn main() -> Result<()> {
             MuxAction::Status => commands::mux::status(),
             MuxAction::Serve => commands::mux::serve(),
         },
+        Command::Upgrade { name, check } => {
+            commands::upgrade::upgrade(name.as_deref(), check)
+        }
     }
 }
 

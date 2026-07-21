@@ -7,6 +7,7 @@ pub mod new;
 pub mod publish;
 pub mod pull;
 pub mod search;
+pub mod upgrade;
 
 use anyhow::{Context, Result};
 use skillforge_core::Manifest;
