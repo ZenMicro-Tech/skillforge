@@ -6,6 +6,18 @@ use crate::sources;
 
 const DEFAULT_CATALOG: &str = "ghcr.io/zenmicro-tech/skillforge/skills/catalog";
 
+/// Install each requested skill in argument order. Processing stops at the
+/// first failure so callers receive a non-zero exit status.
+pub fn add_all(name_or_refs: &[String]) -> Result<()> {
+    for name_or_ref in name_or_refs {
+        if name_or_refs.len() > 1 {
+            eprintln!("\nadding {name_or_ref}...");
+        }
+        add(name_or_ref).with_context(|| format!("adding {name_or_ref}"))?;
+    }
+    Ok(())
+}
+
 pub fn add(name_or_ref: &str) -> Result<()> {
     let dir = if is_oci_ref(name_or_ref) {
         let reference = resolve_oci_tag(name_or_ref)?;

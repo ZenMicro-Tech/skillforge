@@ -83,6 +83,14 @@ skillforge add my-skill
 
 This compiles the skill, registers it with every detected agent (Claude Code, Claude Desktop, Cursor), and you're done. Open a new agent session and the skill appears as a tool.
 
+Install several skills in one command by listing each local name or OCI reference:
+
+```sh
+skillforge add git github ghcr.io/yourname/skills/aws-s3:0.1.0
+```
+
+Skills are processed in the order supplied. The command stops at the first failed installation and reports which skill failed.
+
 ### 4. Use it
 
 ```sh
@@ -146,7 +154,7 @@ See [`examples/s3-agent`](examples/s3-agent/) for a Dockerized example that pull
 | Command | What it does |
 |---|---|
 | `skillforge new <name>` | Scaffold a new skill directory |
-| `skillforge add <name-or-ref>` | Resolve (locally or via OCI), build, register, link |
+| `skillforge add <name-or-ref>...` | Resolve one or more skills (locally or via OCI), build, register, link |
 | `skillforge remove <name>` | Unlink and remove from registry |
 | `skillforge publish <name> [--repo R]` | Push to OCI registry via ORAS |
 | `skillforge build [--path]` | Build without installing |
