@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.1.8] - 2026-07-20
+
+### Added
+
+- Agent adapters for Visual Studio Code, GitHub Copilot, and Windsurf.
+- `skillforge upgrade [name] [--check]` to check for and install available catalog updates for all installed skills or a named skill.
+- `skillforge add` now accepts multiple local skill names and OCI references in one invocation.
+- `skillforge remove` now accepts multiple skill names in one invocation (for example, `skillforge remove git github`).
+
+### Changed
+
+- OCI pulls now select the image variant matching the current operating system and CPU architecture from multi-platform image indexes.
+
 ## [0.1.7] - 2026-07-16
 
 ### Added
@@ -76,7 +89,8 @@ All notable changes to this project will be documented in this file.
 - Skill scaffolding (`skillforge new`), build, run, and link/unlink commands.
 - MCP stdio server mode (`skillforge tool`).
 
-[Unreleased]: https://github.com/ZenMicro-Tech/ai-skills-platform/compare/v0.1.7...HEAD
+[Unreleased]: https://github.com/ZenMicro-Tech/ai-skills-platform/compare/v0.1.8...HEAD
+[0.1.8]: https://github.com/ZenMicro-Tech/ai-skills-platform/compare/v0.1.7...v0.1.8
 [0.1.7]: https://github.com/ZenMicro-Tech/ai-skills-platform/compare/v0.1.6...v0.1.7
 [0.1.6]: https://github.com/ZenMicro-Tech/ai-skills-platform/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/ZenMicro-Tech/ai-skills-platform/compare/v0.1.4...v0.1.5
