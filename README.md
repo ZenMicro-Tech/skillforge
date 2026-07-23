@@ -116,6 +116,24 @@ Others can then install it with:
 skillforge add ghcr.io/yourname/skills/my-skill:0.1.0
 ```
 
+### Discover and choose a version
+
+Search the public catalog, then inspect a skill to see every available version in
+newest-first order:
+
+```sh
+skillforge search word-count
+skillforge search --info word-count
+```
+
+For public Skillforge skills, install the newest release by name or pin a version
+using Docker-style tag syntax:
+
+```sh
+skillforge add word-count
+skillforge add word-count:0.1.0
+```
+
 ---
 
 ## Example: word-count skill with a Python agent
@@ -161,6 +179,7 @@ See [`examples/s3-agent`](examples/s3-agent/) for a Dockerized example that pull
 | `skillforge run [--path] -- --input '...'` | Invoke a skill's deterministic CLI mode |
 | `skillforge tool [--path]` | Run a skill as an MCP stdio server |
 | `skillforge describe [--path]` | Print embedded manifest, prompt, and schema |
+| `skillforge search [query] [--info name]` | Discover skills; `--info` lists all available versions |
 | `skillforge mux enable\|disable\|status` | Toggle the single-server aggregator |
 | `skillforge upgrade [name] [--check]` | Check for and apply newer versions of installed skills |
 

@@ -19,9 +19,9 @@ enum Command {
     /// Build and install one or more skills into every detected agent.
     ///
     /// Each argument may be a local skill name (resolved from `./skills/<name>`
-    /// or `~/.skillforge/skills/<name>`) or an OCI reference (e.g.
-    /// `ghcr.io/owner/skills/example-skill:0.1.0`). OCI refs are detected by
-    /// the presence of `:` or `/`.
+    /// or `~/.skillforge/skills/<name>`), a public skill name with an optional
+    /// version (e.g. `example-skill:0.1.0`), or an OCI reference (e.g.
+    /// `ghcr.io/owner/skills/example-skill:0.1.0`).
     Add {
         #[arg(required = true, num_args = 1..)]
         name_or_refs: Vec<String>,
@@ -105,7 +105,7 @@ enum Command {
     Search {
         /// Filter skills by name (substring match). Omit to list all.
         query: Option<String>,
-        /// Show detailed info for a specific skill name.
+        /// Show a skill's details, available versions, and install commands.
         #[arg(long)]
         info: Option<String>,
         /// OCI catalog repository to query. Defaults to the public skillforge catalog.
