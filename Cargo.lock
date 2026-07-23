@@ -1617,7 +1617,7 @@ checksum = "e3a9fe34e3e7a50316060351f37187a3f546bce95496156754b601a5fa71b76e"
 
 [[package]]
 name = "skillforge-cli"
-version = "0.1.8"
+version = "0.1.9"
 dependencies = [
  "anyhow",
  "base64",
@@ -1635,7 +1635,7 @@ dependencies = [
 
 [[package]]
 name = "skillforge-core"
-version = "0.1.8"
+version = "0.1.9"
 dependencies = [
  "serde",
  "serde_json",
@@ -1645,7 +1645,7 @@ dependencies = [
 
 [[package]]
 name = "skillforge-mcp"
-version = "0.1.8"
+version = "0.1.9"
 dependencies = [
  "anyhow",
  "serde",
@@ -1654,7 +1654,7 @@ dependencies = [
 
 [[package]]
 name = "skillforge-runtime"
-version = "0.1.8"
+version = "0.1.9"
 dependencies = [
  "anyhow",
  "serde_json",
