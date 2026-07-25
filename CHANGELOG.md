@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.1.9] - 2026-07-23
+
+### Added
+
+- `skillforge search --info <name>` now lists every available version in newest-first order and shows commands for installing the latest or a pinned release.
+- Docker-style bare public-skill references are supported: `skillforge add <name>:<version>` installs a specific version from the default Skillforge GHCR namespace.
+
+### Changed
+
+- `skillforge add <name>` now resolves a matching local skill first, then falls back directly to `ghcr.io/zenmicro-tech/skillforge/skills/<name>` and selects the latest compatible version.
+
 ## [0.1.8] - 2026-07-20
 
 ### Added
@@ -89,7 +100,8 @@ All notable changes to this project will be documented in this file.
 - Skill scaffolding (`skillforge new`), build, run, and link/unlink commands.
 - MCP stdio server mode (`skillforge tool`).
 
-[Unreleased]: https://github.com/ZenMicro-Tech/ai-skills-platform/compare/v0.1.8...HEAD
+[Unreleased]: https://github.com/ZenMicro-Tech/ai-skills-platform/compare/v0.1.9...HEAD
+[0.1.9]: https://github.com/ZenMicro-Tech/ai-skills-platform/compare/v0.1.8...v0.1.9
 [0.1.8]: https://github.com/ZenMicro-Tech/ai-skills-platform/compare/v0.1.7...v0.1.8
 [0.1.7]: https://github.com/ZenMicro-Tech/ai-skills-platform/compare/v0.1.6...v0.1.7
 [0.1.6]: https://github.com/ZenMicro-Tech/ai-skills-platform/compare/v0.1.5...v0.1.6

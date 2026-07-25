@@ -4,7 +4,7 @@ use crate::oci;
 use crate::registry;
 use crate::sources;
 
-const DEFAULT_CATALOG: &str = "ghcr.io/zenmicro-tech/skillforge/skills/catalog";
+const DEFAULT_REGISTRY: &str = "ghcr.io/zenmicro-tech/skillforge/skills";
 
 /// Install each requested skill in argument order. Processing stops at the
 /// first failure so callers receive a non-zero exit status.
@@ -23,10 +23,13 @@ pub fn add(name_or_ref: &str) -> Result<()> {
         let reference = resolve_oci_tag(name_or_ref)?;
         super::pull::fetch_oci(&reference)?
     } else {
-        match sources::resolve(name_or_ref) {
-            Ok(dir) => dir,
-            Err(_) => {
-                let reference = resolve_from_catalog(name_or_ref)?;
+        let (name, tag) = split_bare_ref(name_or_ref);
+        match sources::resolve(name) {
+            Ok(dir) if tag.is_none() => dir,
+            Ok(_) | Err(_) => {
+                let reference = resolve_default_repo(name, tag);
+                eprintln!("not found locally; pulling {reference}...");
+                let reference = resolve_oci_tag(&reference)?;
                 super::pull::fetch_oci(&reference)?
             }
         }
@@ -48,10 +51,10 @@ pub fn add(name_or_ref: &str) -> Result<()> {
     Ok(())
 }
 
-/// True if the argument looks like an OCI reference (`<host>/<path>[:tag]`)
-/// rather than a bare skill name.
+/// True if the argument is an explicit OCI reference (`<host>/<path>[:tag]`)
+/// rather than a bare skill name, optionally followed by `:<tag>`.
 fn is_oci_ref(s: &str) -> bool {
-    s.contains('/') || s.contains(':')
+    s.contains('/')
 }
 
 /// When an OCI reference has no explicit tag, resolve the latest version by
@@ -107,47 +110,20 @@ fn current_platform() -> String {
     format!("{os}-{arch}")
 }
 
-/// Resolve a bare skill name by looking it up in the catalog.
-fn resolve_from_catalog(name: &str) -> Result<String> {
-    eprintln!("searching registry for \"{name}\"...");
-    let tags = oci::list_tags(DEFAULT_CATALOG)
-        .context("fetching skill catalog")?;
-
-    let matching: Vec<(&str, &str)> = tags
-        .iter()
-        .filter_map(|tag| {
-            let (n, v) = tag.rsplit_once("--")?;
-            if n == name { Some((n, v)) } else { None }
-        })
-        .collect();
-
-    if matching.is_empty() {
-        anyhow::bail!(
-            "skill \"{name}\" not found in registry.\n\
-             Run `skillforge search` to see available skills."
-        );
+/// Split a bare skill reference into its name and optional version tag.
+fn split_bare_ref(reference: &str) -> (&str, Option<&str>) {
+    match reference.rsplit_once(':') {
+        Some((name, tag)) if !name.is_empty() && !tag.is_empty() => (name, Some(tag)),
+        _ => (reference, None),
     }
+}
 
-    let latest_version = matching
-        .iter()
-        .map(|(_, v)| *v)
-        .max_by(|a, b| cmp_semver(a, b))
-        .unwrap();
-
-    let catalog_tag = format!("{name}--{latest_version}");
-    let catalog_ref = format!("{DEFAULT_CATALOG}:{catalog_tag}");
-    let annotations = oci::fetch_manifest_annotations(&catalog_ref)
-        .with_context(|| format!("fetching catalog metadata for {name}"))?;
-
-    let repo = annotations
-        .get("skillforge.skill.repo")
-        .ok_or_else(|| anyhow::anyhow!(
-            "catalog entry for \"{name}\" is missing repo reference"
-        ))?;
-
-    let reference = format!("{repo}:{latest_version}");
-    eprintln!("  found {name} v{latest_version} at {repo}");
-    Ok(reference)
+/// Resolve a bare skill name to its repository in the default GHCR namespace.
+fn resolve_default_repo(name: &str, tag: Option<&str>) -> String {
+    match tag {
+        Some(tag) => format!("{DEFAULT_REGISTRY}/{name}:{tag}"),
+        None => format!("{DEFAULT_REGISTRY}/{name}"),
+    }
 }
 
 fn cmp_semver(a: &str, b: &str) -> std::cmp::Ordering {
@@ -161,6 +137,39 @@ fn cmp_semver(a: &str, b: &str) -> std::cmp::Ordering {
         )
     };
     parse(a).cmp(&parse(b))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{is_oci_ref, resolve_default_repo, split_bare_ref};
+
+    #[test]
+    fn bare_skill_names_resolve_to_the_default_ghcr_namespace() {
+        assert_eq!(
+            resolve_default_repo("word-count", None),
+            "ghcr.io/zenmicro-tech/skillforge/skills/word-count"
+        );
+    }
+
+    #[test]
+    fn tagged_bare_skill_names_resolve_to_the_default_ghcr_namespace() {
+        let (name, tag) = split_bare_ref("word-count:1.2.3");
+
+        assert_eq!(name, "word-count");
+        assert_eq!(tag, Some("1.2.3"));
+        assert_eq!(
+            resolve_default_repo(name, tag),
+            "ghcr.io/zenmicro-tech/skillforge/skills/word-count:1.2.3"
+        );
+    }
+
+    #[test]
+    fn distinguishes_bare_skill_names_from_explicit_oci_references() {
+        assert!(!is_oci_ref("word-count"));
+        assert!(!is_oci_ref("word-count:1.2.3"));
+        assert!(is_oci_ref("ghcr.io/acme/skills/word-count"));
+        assert!(is_oci_ref("ghcr.io/acme/skills/word-count:1.2.3"));
+    }
 }
 
 /// Remove each requested skill in argument order. Processing stops at the

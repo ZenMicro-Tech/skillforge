@@ -76,7 +76,10 @@ pub fn search(query: Option<&str>, registry: Option<&str>) -> Result<()> {
     }
 
     println!();
-    println!("{} skill(s) found. Run `skillforge search --info <name>` for install instructions.", by_name.len());
+    println!(
+        "{} skill(s) found. Run `skillforge search --info <name>` to see available versions and install instructions.",
+        by_name.len()
+    );
 
     Ok(())
 }
@@ -89,18 +92,17 @@ pub fn search_detail(name: &str, registry: Option<&str>) -> Result<()> {
     let tags = oci::list_tags(catalog)?;
     let entries = parse_catalog_tags(&tags);
 
-    let matching: Vec<&CatalogEntry> = entries.iter().filter(|e| e.name == name).collect();
+    let mut matching: Vec<&CatalogEntry> = entries.iter().filter(|e| e.name == name).collect();
 
     if matching.is_empty() {
         eprintln!("skill \"{name}\" not found in {catalog}");
         return Ok(());
     }
 
-    // Fetch annotations from the latest version's manifest
-    let latest = matching
-        .iter()
-        .max_by(|a, b| cmp_semver(&a.version, &b.version))
-        .unwrap();
+    sort_entries_by_version_desc(&mut matching);
+
+    // Fetch annotations from the latest version's manifest.
+    let latest = matching.first().unwrap();
 
     let reference = format!("{catalog}:{}", latest.tag);
     let annotations = oci::fetch_manifest_annotations(&reference)?;
@@ -123,15 +125,17 @@ pub fn search_detail(name: &str, registry: Option<&str>) -> Result<()> {
     }
 
     println!();
-    println!("  versions:");
-    for entry in matching.iter().rev() {
+    println!("  available versions:");
+    for entry in &matching {
         println!("    {}", entry.version);
     }
 
     println!();
-    println!("  install:");
+    println!("  install latest:");
     if let Some(repo) = annotations.get("skillforge.skill.repo") {
         println!("    skillforge add {repo}:{}", latest.version);
+        println!("  install a specific version:");
+        println!("    skillforge add {repo}:<version>");
     } else {
         println!("    skillforge add {catalog}:{}", latest.tag);
     }
@@ -165,6 +169,10 @@ fn semver_gt(a: &str, b: &str) -> bool {
     cmp_semver(a, b) == std::cmp::Ordering::Greater
 }
 
+fn sort_entries_by_version_desc(entries: &mut [&CatalogEntry]) {
+    entries.sort_by(|a, b| cmp_semver(&b.version, &a.version));
+}
+
 fn cmp_semver(a: &str, b: &str) -> std::cmp::Ordering {
     let parse = |s: &str| -> (u64, u64, u64) {
         let core = s.split(['-', '+']).next().unwrap_or("");
@@ -176,4 +184,29 @@ fn cmp_semver(a: &str, b: &str) -> std::cmp::Ordering {
         )
     };
     parse(a).cmp(&parse(b))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{parse_catalog_tags, sort_entries_by_version_desc};
+
+    #[test]
+    fn detail_versions_are_sorted_from_latest_to_oldest() {
+        let entries = parse_catalog_tags(&[
+            "word-count--0.1.0".to_string(),
+            "word-count--1.0.0".to_string(),
+            "word-count--0.2.0".to_string(),
+        ]);
+        let mut versions: Vec<_> = entries.iter().collect();
+
+        sort_entries_by_version_desc(&mut versions);
+
+        assert_eq!(
+            versions
+                .iter()
+                .map(|entry| entry.version.as_str())
+                .collect::<Vec<_>>(),
+            ["1.0.0", "0.2.0", "0.1.0"]
+        );
+    }
 }
