@@ -1,12 +1,12 @@
-# skillforge
+# Skillforge
 
-A package manager for AI skills. Build a skill once as a compiled binary; install it into Claude Code, Claude Desktop, Cursor, or any MCP-compatible agent with one command.
+**Package AI capabilities once. Install them in any agent.**
 
-A **skill** is a self-contained binary that embeds its own prompt, JSON schema, and execution logic. The same artifact works as an MCP tool, a CLI command, an HTTP server, or a library — no wrappers, no adapters.
+Skillforge bundles execution logic, prompts, and schemas into versioned skills you can distribute through OCI registries and install with one command.
 
-## Quick Start
+## Quickstart
 
-### 1. Install skillforge
+### 1. Install Skillforge
 
 **Homebrew (macOS/Linux):**
 
@@ -14,7 +14,191 @@ A **skill** is a self-contained binary that embeds its own prompt, JSON schema, 
 brew install ZenMicro-Tech/tap/skillforge
 ```
 
-**Prebuilt binary:**
+Or install from source:
+
+```sh
+git clone https://github.com/ZenMicro-Tech/skillforge.git
+cd skillforge
+cargo install --path crates/skillforge-cli
+```
+
+Verify the CLI:
+
+```sh
+skillforge --version
+```
+
+### 2. Find and install a capability
+
+```sh
+# Browse the public catalog
+skillforge search
+
+# Inspect a skill and its available versions
+skillforge search --info web-fetch
+
+# Install the latest version into every detected agent
+skillforge add web-fetch
+```
+
+Skillforge resolves the skill, builds it, records the installation, and configures each directly supported agent: Claude Code, Claude Desktop, GitHub Copilot, Cursor, Visual Studio Code, and Windsurf. For other MCP clients, it prints a paste-ready configuration snippet. Launch a supported agent in a new session, then ask it to use the new tool:
+
+```text
+Use skillforge-web-fetch to fetch https://www.rust-lang.org and return the page as simplified markdown.
+```
+
+To make an install reproducible, pin the release:
+
+```sh
+skillforge add web-fetch:0.1.1
+```
+
+To install a skill from your own OCI registry instead:
+
+```sh
+skillforge add ghcr.io/acme/skills/document-redactor:1.2.0
+```
+
+### 3. Confirm, update, or remove it
+
+```sh
+skillforge list
+skillforge upgrade --check
+skillforge upgrade web-fetch
+skillforge remove web-fetch
+```
+
+## Create and distribute your own capability
+
+Use this workflow when you want to turn internal expertise, API access, or repeatable automation into a capability the whole team can install.
+
+### 1. Scaffold and define the skill
+
+```sh
+skillforge new document-redactor
+cd document-redactor
+```
+
+The generated project keeps the skill contract and implementation together:
+
+```text
+document-redactor/
+├── skill.toml    # name, version, description, and interfaces
+├── prompt.md     # instructions presented to the LLM
+├── schema.json   # JSON Schema for tool input
+├── src/main.rs   # deterministic execution logic
+├── build.rs      # embeds the prompt and schema in the binary
+└── Cargo.toml
+```
+
+Implement the logic, describe its input in `schema.json`, and make the prompt explain when and how an agent should call it.
+
+### 2. Build and test locally
+
+```sh
+skillforge build --path .
+skillforge describe --path .
+skillforge run --path . -- --input '{"text":"Remove personal data from this document."}'
+```
+
+`describe` lets you inspect the exact manifest, prompt, and schema embedded in the built skill. `run` invokes its deterministic CLI mode, which is useful for local checks and CI.
+
+To use a local skill in detected agents before publishing it:
+
+```sh
+skillforge add document-redactor
+```
+
+### 3. Publish a versioned artifact
+
+Authenticate to your OCI registry with ORAS, then publish:
+
+```sh
+oras login ghcr.io
+skillforge publish document-redactor --registry ghcr.io/acme/skills
+```
+
+Skillforge builds the release binary and publishes it with `skill.toml`, `prompt.md`, and `schema.json` to:
+
+```text
+ghcr.io/acme/skills/document-redactor:<version>
+```
+
+Anyone with registry access can now install that exact capability:
+
+```sh
+skillforge add ghcr.io/acme/skills/document-redactor:1.0.0
+```
+
+For multi-platform distribution, provide each Rust target:
+
+```sh
+skillforge publish document-redactor \
+  --registry ghcr.io/acme/skills \
+  --target aarch64-apple-darwin \
+  --target x86_64-unknown-linux-gnu
+```
+
+## Supported agent integrations
+
+Skillforge detects and writes the MCP configuration for these installed applications:
+
+- Claude Code
+- Claude Desktop
+- GitHub Copilot
+- Cursor
+- Visual Studio Code
+- Windsurf
+
+For another MCP-compatible client, Skillforge prints a JSON configuration snippet that you can paste into that client's configuration.
+
+By default, each installed skill is registered as its own MCP server. If your client benefits from one server that exposes all installed skills, enable mux mode:
+
+```sh
+skillforge mux enable
+skillforge mux status
+```
+
+Mux mode registers a single `skillforge` MCP server and dynamically exposes all skills in the local registry.
+
+## Use a skill outside a managed agent
+
+Skills are portable executables, not only agent integrations.
+
+```sh
+# Run as a one-tool MCP stdio server
+skillforge tool --path ./document-redactor
+
+# Invoke deterministic CLI mode from a shell or CI
+skillforge run --path ./document-redactor -- --input '{"text":"..."}'
+
+# Inspect the contract embedded in a built binary
+skillforge describe --path ./document-redactor
+```
+
+The [`skills/word-count`](skills/word-count/) directory contains a complete example. See [`examples/s3-agent`](examples/s3-agent/) for an example that retrieves a skill from an OCI registry during a Docker build and uses it from a Python agent.
+
+## Common commands
+
+| Command | Purpose |
+|---|---|
+| `skillforge search [query]` | Browse the public skill catalog |
+| `skillforge search --info <name>` | View a skill's details, versions, and install commands |
+| `skillforge add <name-or-ref>...` | Install local skills, catalog skills, or OCI references |
+| `skillforge list` | List installed skills |
+| `skillforge remove <name>...` | Remove skills from the registry and detected agents |
+| `skillforge upgrade [name] [--check]` | Check for and install newer skill versions |
+| `skillforge new <name>` | Scaffold a Rust skill project |
+| `skillforge build [--path <dir>]` | Build a skill without installing it |
+| `skillforge publish <name> [--registry <repo>]` | Publish a skill to an OCI registry |
+| `skillforge run [--path <dir>] -- --input '<json>'` | Invoke deterministic CLI mode |
+| `skillforge tool [--path <dir>]` | Run a skill as an MCP stdio server |
+| `skillforge describe [--path <dir>]` | Print the embedded manifest, prompt, and schema |
+| `skillforge mux enable\|disable\|status` | Manage the single-server MCP aggregator |
+
+## Installation options
+
+If Homebrew is not available, download a prebuilt binary from the [latest release](https://github.com/ZenMicro-Tech/skillforge/releases/latest):
 
 ```sh
 mkdir -p ~/.local/bin
@@ -36,206 +220,22 @@ curl -fSL https://github.com/ZenMicro-Tech/skillforge/releases/latest/download/s
   -o ~/.local/bin/skillforge && chmod +x ~/.local/bin/skillforge
 ```
 
-Make sure `~/.local/bin` is on your PATH:
+Ensure `~/.local/bin` is on your `PATH`:
 
 ```sh
 echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc  # or ~/.bashrc
 ```
 
-**From source:**
-
-```sh
-git clone https://github.com/ZenMicro-Tech/skillforge.git
-cd skillforge
-cargo install --path crates/skillforge-cli
-```
-
-Verify the install:
-
-```sh
-skillforge --version
-```
-
-### 2. Create your first skill
-
-```sh
-skillforge new my-skill
-cd my-skill
-```
-
-This scaffolds a ready-to-build skill:
-
-```
-my-skill/
-  skill.toml      # metadata: name, version, interfaces
-  prompt.md       # LLM-facing instructions
-  schema.json     # JSON Schema for tool input
-  src/main.rs     # your skill logic
-  build.rs        # embeds prompt + schema into the binary
-  Cargo.toml
-```
-
-### 3. Build and install
-
-```sh
-skillforge add my-skill
-```
-
-This compiles the skill, registers it with every detected agent (Claude Code, Claude Desktop, Cursor), and you're done. Open a new agent session and the skill appears as a tool.
-
-Install several skills in one command by listing each local name or OCI reference:
-
-```sh
-skillforge add git github ghcr.io/yourname/skills/aws-s3:0.1.0
-```
-
-Skills are processed in the order supplied. The command stops at the first failed installation and reports which skill failed.
-
-### 4. Use it
-
-```sh
-# As a CLI
-skillforge run --path ./my-skill -- --input '{"text": "hello world"}'
-
-# As an MCP server (agents call this automatically)
-skillforge tool --path ./my-skill
-
-# Inspect what's embedded
-skillforge describe --path ./my-skill
-```
-
-### 5. Publish to a registry
-
-```sh
-skillforge publish my-skill
-```
-
-Others can then install it with:
-
-```sh
-skillforge add ghcr.io/yourname/skills/my-skill:0.1.0
-```
-
-### Discover and choose a version
-
-Search the public catalog, then inspect a skill to see every available version in
-newest-first order:
-
-```sh
-skillforge search word-count
-skillforge search --info word-count
-```
-
-For public Skillforge skills, install the newest release by name or pin a version
-using Docker-style tag syntax:
-
-```sh
-skillforge add word-count
-skillforge add word-count:0.1.0
-```
-
----
-
-## Example: word-count skill with a Python agent
-
-The [`skills/word-count`](skills/word-count/) directory shows a complete skill. Here's how to wire it up to a [Strands](https://github.com/strands-agents/sdk-python) agent:
-
-```sh
-cd skills/word-count
-skillforge build --path .
-python agent.py "How many words are in the Gettysburg Address?"
-```
-
-The agent calls the compiled binary over MCP stdio — no HTTP, no containers, no config files:
-
-```python
-from strands import Agent
-from strands.tools.mcp import MCPClient
-from mcp import StdioServerParameters
-from mcp.client.stdio import stdio_client
-
-mcp = MCPClient(lambda: stdio_client(
-    StdioServerParameters(command="./target/release/word-count", args=["tool"])
-))
-
-with mcp:
-    agent = Agent(model=model, tools=[mcp])
-    print(agent("Count the words in this text: ..."))
-```
-
-See [`examples/s3-agent`](examples/s3-agent/) for a Dockerized example that pulls a skill from an OCI registry at build time.
-
----
-
-## Commands
-
-| Command | What it does |
-|---|---|
-| `skillforge new <name>` | Scaffold a new skill directory |
-| `skillforge add <name-or-ref>...` | Resolve one or more skills (locally or via OCI), build, register, link |
-| `skillforge remove <name>...` | Unlink and remove one or more skills from the registry |
-| `skillforge publish <name> [--repo R]` | Push to OCI registry via ORAS |
-| `skillforge build [--path]` | Build without installing |
-| `skillforge run [--path] -- --input '...'` | Invoke a skill's deterministic CLI mode |
-| `skillforge tool [--path]` | Run a skill as an MCP stdio server |
-| `skillforge describe [--path]` | Print embedded manifest, prompt, and schema |
-| `skillforge search [query] [--info name]` | Discover skills; `--info` lists all available versions |
-| `skillforge mux enable\|disable\|status` | Toggle the single-server aggregator |
-| `skillforge upgrade [name] [--check]` | Check for and apply newer versions of installed skills |
-
-## Upgrading skills
-
-Check for available updates:
-
-```sh
-skillforge upgrade --check          # check all installed skills
-skillforge upgrade --check my-skill # check a specific skill
-```
-
-Apply upgrades:
-
-```sh
-skillforge upgrade                  # upgrade all installed skills
-skillforge upgrade my-skill         # upgrade a specific skill
-```
-
-The `upgrade` command queries the OCI catalog for newer versions, pulls the latest artifact, rebuilds, and re-links — all without touching your existing install until the new version is ready.
-
-> **Note on `add` idempotency:** Running `skillforge add` for an already-installed skill is safe — the linking step deduplicates across all adapters and will skip with "already linked." However, the command is not fully idempotent: it will re-fetch OCI artifacts (deleting the existing install first), re-build, and re-register on every invocation. If a re-run fails mid-way (e.g., network error), a previously working OCI install may be lost. Use `skillforge upgrade` to safely update to a newer version.
-
-## Mux mode
-
-By default each skill is its own MCP server. **Mux mode** registers a single `skillforge` server that aggregates all installed skills:
-
-```sh
-skillforge mux enable    # one server, many tools
-skillforge mux status
-skillforge mux disable   # back to per-skill registration
-```
-
-Mux mode re-reads the registry on every `tools/list` call, so newly-added skills appear without restarting agents.
-
-## How skills work
-
-The compiled binary supports four modes selected by the first argument:
-
-| Mode | Caller | Purpose |
-|---|---|---|
-| `tool` | MCP-compatible agent | JSON-RPC stdio server |
-| `run --input <json>` | shell, CI | Deterministic CLI invocation |
-| `serve` | remote agent | HTTP/SSE (Phase 2) |
-| `describe` | tooling | Dump embedded prompt + schema |
-
 ## Prerequisites
 
-- Rust 1.85+
-- At least one MCP-compatible agent (Claude Code, Claude Desktop, or Cursor)
-- [ORAS](https://oras.land/docs/installation) for `publish` and OCI-ref `add` (`brew install oras`)
+- Rust 1.85+ to build skills on the local machine
+- At least one MCP-compatible agent to use Skillforge-managed integrations
+- [ORAS](https://oras.land/docs/installation) for OCI publishing and installing OCI references (`brew install oras`)
 
 ## Configuration
 
-- `SKILLFORGE_HOME` — overrides `~/.skillforge`. Useful for tests and CI.
+- `SKILLFORGE_HOME` — overrides `~/.skillforge`; useful for CI and isolated environments.
 
-## Architecture
+## Architecture and roadmap
 
-See [plan.md](plan.md) for the full design document — distribution, signing (Phase 2), and sandboxing (Phase 3).
+See [plan.md](plan.md) for the architecture and planned work, including signing and sandboxing.
