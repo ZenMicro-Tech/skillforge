@@ -111,12 +111,14 @@ skillforge add document-redactor
 
 ### 3. Publish a versioned artifact
 
-Authenticate to your OCI registry with ORAS, then publish:
+Authenticate to your OCI registry, then publish:
 
 ```sh
-oras login ghcr.io
+skillforge login ghcr.io
 skillforge publish document-redactor --registry ghcr.io/acme/skills
 ```
+
+`skillforge login` stores credentials in `~/.skillforge/credentials.json` — no Docker or `oras` installation required. Run `skillforge logout ghcr.io` to remove them.
 
 Skillforge builds the release binary and publishes it with `skill.toml`, `prompt.md`, and `schema.json` to:
 
@@ -230,7 +232,6 @@ echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc  # or ~/.bashrc
 
 - Rust 1.85+ to build skills on the local machine
 - At least one MCP-compatible agent to use Skillforge-managed integrations
-- [ORAS](https://oras.land/docs/installation) for OCI publishing and installing OCI references (`brew install oras`)
 
 ## Configuration
 
