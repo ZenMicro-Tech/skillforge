@@ -2,6 +2,7 @@ pub mod add;
 pub mod build;
 pub mod delegate;
 pub mod link;
+pub mod login;
 pub mod mux;
 pub mod new;
 pub mod publish;

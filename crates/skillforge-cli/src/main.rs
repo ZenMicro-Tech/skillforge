@@ -3,6 +3,7 @@ use clap::{Parser, Subcommand};
 
 mod adapters;
 mod commands;
+mod credentials;
 mod oci;
 mod registry;
 mod sources;
@@ -31,7 +32,7 @@ enum Command {
         #[arg(required = true, num_args = 1..)]
         names: Vec<String>,
     },
-    /// Publish a skill to an OCI registry (via ORAS).
+    /// Publish a skill to an OCI registry.
     Publish {
         name: String,
         /// Override the `[publish].registry` from skill.toml.
@@ -131,6 +132,25 @@ enum Command {
         /// Upgrade a specific skill by name. Omit to upgrade all.
         name: Option<String>,
     },
+    /// Log in to an OCI registry and store credentials for `publish`/`add`.
+    ///
+    /// Credentials are saved to `~/.skillforge/credentials.json` — no Docker
+    /// or `oras` installation required.
+    Login {
+        /// Registry hostname, e.g. `ghcr.io`. Defaults to `ghcr.io`.
+        registry: Option<String>,
+        /// Username to authenticate with. Prompted for if omitted.
+        #[arg(short, long)]
+        username: Option<String>,
+        /// Read the password/token from stdin instead of prompting.
+        #[arg(long)]
+        password_stdin: bool,
+    },
+    /// Remove stored credentials for a registry.
+    Logout {
+        /// Registry hostname, e.g. `ghcr.io`. Defaults to `ghcr.io`.
+        registry: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -197,6 +217,12 @@ fn main() -> Result<()> {
         Command::Upgrade { name, check } => {
             commands::upgrade::upgrade(name.as_deref(), check)
         }
+        Command::Login {
+            registry,
+            username,
+            password_stdin,
+        } => commands::login::login(registry.as_deref(), username.as_deref(), password_stdin),
+        Command::Logout { registry } => commands::login::logout(registry.as_deref()),
     }
 }
 

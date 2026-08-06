@@ -8,7 +8,7 @@ use bytes::Bytes;
 use oci_client::client::{Client, ClientConfig, Config, ImageLayer};
 use oci_client::manifest::{ImageIndexEntry, OciImageIndex, OciImageManifest, Platform};
 use oci_client::secrets::RegistryAuth;
-use oci_client::Reference;
+use oci_client::{Reference, RegistryOperation};
 use oci_spec::image::{Arch, Os};
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -343,12 +343,17 @@ fn read_layers(files: &[PushFile<'_>]) -> Result<Vec<ImageLayer>> {
 // Authentication
 //
 // Resolution order:
-//   1. Docker config (~/.docker/config.json): credHelpers, credsStore, auths
-//   2. GitHub-specific: GH_TOKEN / GITHUB_TOKEN env vars, `gh auth token`
-//   3. Anonymous
+//   1. skillforge's own credential store (~/.skillforge/credentials.json),
+//      populated by `skillforge login` — no Docker required.
+//   2. Docker config (~/.docker/config.json): credHelpers, credsStore, auths
+//   3. GitHub-specific: GH_TOKEN / GITHUB_TOKEN env vars, `gh auth token`
+//   4. Anonymous
 // ---------------------------------------------------------------------------
 
 fn auth_for_pull(reference: &Reference) -> RegistryAuth {
+    if let Some(auth) = skillforge_auth_for(reference.registry()) {
+        return auth;
+    }
     if let Some(auth) = docker_auth_for(reference.registry()) {
         return auth;
     }
@@ -359,6 +364,9 @@ fn auth_for_pull(reference: &Reference) -> RegistryAuth {
 }
 
 fn auth_for_push(reference: &Reference) -> Result<RegistryAuth> {
+    if let Some(auth) = skillforge_auth_for(reference.registry()) {
+        return Ok(auth);
+    }
     if let Some(auth) = docker_auth_for(reference.registry()) {
         return Ok(auth);
     }
@@ -379,6 +387,45 @@ fn auth_for_push(reference: &Reference) -> Result<RegistryAuth> {
         return Ok(RegistryAuth::Basic(github_username().unwrap_or_default(), token));
     }
     Ok(RegistryAuth::Anonymous)
+}
+
+// ---------------------------------------------------------------------------
+// skillforge's own credential store (~/.skillforge/credentials.json)
+// ---------------------------------------------------------------------------
+
+fn skillforge_auth_for(registry: &str) -> Option<RegistryAuth> {
+    let entry = crate::credentials::get(registry)?;
+    Some(RegistryAuth::Basic(entry.username, entry.secret))
+}
+
+/// Verify that the given credentials are accepted by `registry` before
+/// storing them. Performs an OAuth2 token handshake against a synthetic
+/// repository path; registries that issue scoped tokens without requiring
+/// the repository to exist (the common case) will reject bad credentials
+/// with an authentication error here, without needing any real skill to
+/// exist yet.
+pub fn verify_login(registry: &str, username: &str, secret: &str) -> Result<()> {
+    let probe = format!("{registry}/skillforge-login-check:latest");
+    let reference = parse_ref(&probe)?;
+    let auth = RegistryAuth::Basic(username.to_string(), secret.to_string());
+
+    block_on(async move {
+        let client = Client::new(ClientConfig::default());
+        match client.auth(&reference, &auth, RegistryOperation::Pull).await {
+            Ok(_) => Ok(()),
+            Err(e) => {
+                let msg = e.to_string();
+                let lower = msg.to_lowercase();
+                if lower.contains("401") || lower.contains("unauthorized") || lower.contains("denied") {
+                    Err(anyhow!("registry rejected the credentials: {msg}"))
+                } else {
+                    // Not clearly an auth failure (e.g. registry doesn't
+                    // support token auth at all) — don't block login on it.
+                    Ok(())
+                }
+            }
+        }
+    })
 }
 
 // ---------------------------------------------------------------------------
