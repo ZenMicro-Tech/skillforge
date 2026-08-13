@@ -85,6 +85,13 @@ pub fn search(query: Option<&str>, registry: Option<&str>) -> Result<()> {
 }
 
 pub fn search_detail(name: &str, registry: Option<&str>) -> Result<()> {
+    // A full OCI reference (contains '/') is answered straight from the repo:
+    // versions come from its tag list, metadata from annotations stamped on
+    // the artifact manifest at publish time. No catalog required.
+    if name.contains('/') {
+        return repo_detail(name);
+    }
+
     let catalog = registry.unwrap_or(DEFAULT_CATALOG);
 
     eprintln!("fetching metadata for {name} from {catalog}...");
@@ -143,6 +150,114 @@ pub fn search_detail(name: &str, registry: Option<&str>) -> Result<()> {
     Ok(())
 }
 
+/// Show details for a skill addressed by its full OCI repo reference
+/// (e.g. `ghcr.io/acme/skills/word-count`), without consulting a catalog.
+/// Versions come from the repo's tag list; metadata comes from the
+/// annotations `publish` stamps on the artifact manifest.
+fn repo_detail(reference: &str) -> Result<()> {
+    let repo = oci::strip_tag(reference);
+    eprintln!("fetching metadata from {repo}...");
+
+    let tags = oci::list_tags(repo)?;
+    let versions = repo_versions(&tags);
+
+    if versions.is_empty() {
+        eprintln!("no published versions found in {repo}");
+        return Ok(());
+    }
+
+    let latest = versions[0].version.clone();
+
+    // Read annotations from this host's platform build when available —
+    // multiarch index manifests carry no annotations — else the bare tag.
+    let platform_tag = format!("{latest}-{}", super::pull::current_platform());
+    let annotation_tag = if tags.iter().any(|t| *t == platform_tag) {
+        platform_tag
+    } else {
+        latest.clone()
+    };
+    let annotations = match oci::fetch_manifest_annotations(&format!("{repo}:{annotation_tag}")) {
+        Ok(a) => a,
+        Err(e) => {
+            eprintln!("  (could not fetch manifest annotations: {e})");
+            BTreeMap::new()
+        }
+    };
+
+    let name = annotations
+        .get("skillforge.skill.name")
+        .cloned()
+        .unwrap_or_else(|| repo.rsplit('/').next().unwrap_or(repo).to_string());
+
+    println!("{name}  v{latest}");
+    println!();
+
+    if let Some(desc) = annotations.get("org.opencontainers.image.description") {
+        println!("  {desc}");
+        println!();
+    }
+    if let Some(interfaces) = annotations.get("skillforge.skill.interfaces") {
+        println!("  interfaces: {interfaces}");
+    }
+    if let Some(license) = annotations.get("org.opencontainers.image.licenses") {
+        println!("  license:    {license}");
+    }
+    println!("  source:     {repo}");
+
+    println!();
+    println!("  available versions:");
+    for v in &versions {
+        if v.platforms.is_empty() {
+            println!("    {}", v.version);
+        } else {
+            println!("    {}  ({})", v.version, v.platforms.join(", "));
+        }
+    }
+
+    println!();
+    println!("  install latest:");
+    println!("    skillforge add {repo}:{latest}");
+    println!("  install a specific version:");
+    println!("    skillforge add {repo}:<version>");
+
+    Ok(())
+}
+
+/// A published version and the platforms it has dedicated builds for.
+struct RepoVersion {
+    version: String,
+    platforms: Vec<String>,
+}
+
+/// Normalize raw repo tags into a newest-first list of published versions.
+/// Drops `latest`, maps platform-specific tags (`0.2.0-darwin-arm64`) onto
+/// their base version, and records which platforms each version covers.
+fn repo_versions(tags: &[String]) -> Vec<RepoVersion> {
+    let mut by_version: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for tag in tags {
+        if tag == "latest" {
+            continue;
+        }
+        let (base, platform) = match tag.split_once('-') {
+            Some((b, p)) => (b, Some(p)),
+            None => (tag.as_str(), None),
+        };
+        if !oci::is_bare_semver(base) {
+            continue;
+        }
+        let platforms = by_version.entry(base.to_string()).or_default();
+        if let Some(p) = platform {
+            platforms.push(p.to_string());
+        }
+    }
+    let mut versions: Vec<RepoVersion> = by_version
+        .into_iter()
+        .map(|(version, platforms)| RepoVersion { version, platforms })
+        .collect();
+    versions.sort_by(|a, b| cmp_semver(&b.version, &a.version));
+    versions
+}
+
 struct CatalogEntry {
     name: String,
     version: String,
@@ -188,7 +303,28 @@ fn cmp_semver(a: &str, b: &str) -> std::cmp::Ordering {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_catalog_tags, sort_entries_by_version_desc};
+    use super::{parse_catalog_tags, repo_versions, sort_entries_by_version_desc};
+
+    #[test]
+    fn repo_versions_normalize_platform_tags_and_drop_latest() {
+        let versions = repo_versions(&[
+            "0.1.0".to_string(),
+            "0.2.0".to_string(),
+            "0.2.0-darwin-arm64".to_string(),
+            "0.2.0-linux-amd64".to_string(),
+            "latest".to_string(),
+        ]);
+
+        let names: Vec<&str> = versions.iter().map(|v| v.version.as_str()).collect();
+        assert_eq!(names, ["0.2.0", "0.1.0"]);
+        assert_eq!(versions[0].platforms, ["darwin-arm64", "linux-amd64"]);
+    }
+
+    #[test]
+    fn repo_versions_skip_non_semver_tags() {
+        let versions = repo_versions(&["nightly".to_string(), "latest".to_string()]);
+        assert!(versions.is_empty());
+    }
 
     #[test]
     fn detail_versions_are_sorted_from_latest_to_oldest() {

@@ -19,18 +19,20 @@ pub fn add_all(name_or_refs: &[String]) -> Result<()> {
 }
 
 pub fn add(name_or_ref: &str) -> Result<()> {
-    let dir = if is_oci_ref(name_or_ref) {
+    let (dir, source) = if is_oci_ref(name_or_ref) {
         let reference = resolve_oci_tag(name_or_ref)?;
-        super::pull::fetch_oci(&reference)?
+        let dir = super::pull::fetch_oci(&reference)?;
+        (dir, Some(oci::strip_tag(&reference).to_string()))
     } else {
         let (name, tag) = split_bare_ref(name_or_ref);
         match sources::resolve(name) {
-            Ok(dir) if tag.is_none() => dir,
+            Ok(dir) if tag.is_none() => (dir, None),
             Ok(_) | Err(_) => {
                 let reference = resolve_default_repo(name, tag);
                 eprintln!("not found locally; pulling {reference}...");
                 let reference = resolve_oci_tag(&reference)?;
-                super::pull::fetch_oci(&reference)?
+                let dir = super::pull::fetch_oci(&reference)?;
+                (dir, Some(oci::strip_tag(&reference).to_string()))
             }
         }
     };
@@ -40,7 +42,10 @@ pub fn add(name_or_ref: &str) -> Result<()> {
 
     let manifest = skillforge_core::Manifest::from_path(dir.join("skill.toml"))?;
     let bin = std::fs::canonicalize(dir.join("target/release").join(&manifest.skill.name))?;
-    let (skill_name, entry) = registry::entry_from_dir(&dir, bin)?;
+    let (skill_name, mut entry) = registry::entry_from_dir(&dir, bin)?;
+    // Record where the skill was pulled from so `upgrade` checks the right
+    // registry for newer versions.
+    entry.source = source;
     registry::upsert_skill(&skill_name, entry)?;
 
     if registry::is_mux_enabled() {
@@ -68,7 +73,7 @@ fn resolve_oci_tag(reference: &str) -> Result<String> {
     let tags = oci::list_tags(reference)
         .with_context(|| format!("listing tags for {reference}"))?;
 
-    let platform_suffix = format!("-{}", current_platform());
+    let platform_suffix = format!("-{}", super::pull::current_platform());
 
     // Prefer a platform-specific tag matching this host (e.g. "0.1.0-darwin-arm64")
     let platform_match = tags
@@ -95,19 +100,6 @@ fn resolve_oci_tag(reference: &str) -> Result<String> {
         }
         None => anyhow::bail!("no tags found for {reference}"),
     }
-}
-
-fn current_platform() -> String {
-    let os = match std::env::consts::OS {
-        "macos" => "darwin",
-        o => o,
-    };
-    let arch = match std::env::consts::ARCH {
-        "aarch64" => "arm64",
-        "x86_64" => "amd64",
-        a => a,
-    };
-    format!("{os}-{arch}")
 }
 
 /// Split a bare skill reference into its name and optional version tag.

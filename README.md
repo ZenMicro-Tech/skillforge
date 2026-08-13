@@ -59,6 +59,8 @@ To install a skill from your own OCI registry instead:
 skillforge add ghcr.io/acme/skills/document-redactor:1.2.0
 ```
 
+Skills installed from an explicit OCI reference record their source registry, so `skillforge upgrade` checks that registry — not just the public catalog — for newer versions.
+
 ### 3. Confirm, update, or remove it
 
 ```sh
@@ -185,11 +187,11 @@ The [`skills/word-count`](skills/word-count/) directory contains a complete exam
 | Command | Purpose |
 |---|---|
 | `skillforge search [query]` | Browse the public skill catalog |
-| `skillforge search --info <name>` | View a skill's details, versions, and install commands |
+| `skillforge search --info <name-or-ref>` | View a skill's details, versions, and install commands (catalog name or full OCI reference) |
 | `skillforge add <name-or-ref>...` | Install local skills, catalog skills, or OCI references |
 | `skillforge list` | List installed skills |
 | `skillforge remove <name>...` | Remove skills from the registry and detected agents |
-| `skillforge upgrade [name] [--check]` | Check for and install newer skill versions |
+| `skillforge upgrade [name] [--check]` | Check for and install newer skill versions (each skill is checked against the registry it was installed from) |
 | `skillforge new <name>` | Scaffold a Rust skill project |
 | `skillforge build [--path <dir>]` | Build a skill without installing it |
 | `skillforge publish <name> [--registry <repo>]` | Publish a skill to an OCI registry |
