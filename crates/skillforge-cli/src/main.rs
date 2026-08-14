@@ -107,6 +107,7 @@ enum Command {
         /// Filter skills by name (substring match). Omit to list all.
         query: Option<String>,
         /// Show a skill's details, available versions, and install commands.
+        /// Accepts a catalog name or a full OCI reference (e.g. ghcr.io/acme/skills/word-count).
         #[arg(long)]
         info: Option<String>,
         /// OCI catalog repository to query. Defaults to the public skillforge catalog.

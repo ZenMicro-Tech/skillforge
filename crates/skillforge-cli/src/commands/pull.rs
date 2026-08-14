@@ -108,7 +108,7 @@ fn check_platform_match(reference: &str) -> Result<()> {
     Ok(())
 }
 
-fn current_platform() -> String {
+pub fn current_platform() -> String {
     let os = match std::env::consts::OS {
         "macos" => "darwin",
         o => o,

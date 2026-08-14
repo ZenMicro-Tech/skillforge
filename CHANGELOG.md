@@ -2,7 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [0.1.11] - 2026-08-12
+
+### Added
+
+- `skillforge upgrade` now checks each installed skill's origin registry for updates. `skillforge add` records the OCI repository a skill was pulled from in `~/.skillforge/registry.json`, and `upgrade` lists tags on that repo directly (preferring a platform-specific build for the current host) instead of only consulting the default catalog. Skills installed before this change, and skills from the default namespace, continue to resolve through the default catalog.
+- `skillforge search --info` now accepts a full OCI reference (for example, `skillforge search --info ghcr.io/acme/skills/word-count`) and reports available versions — including per-platform builds — and metadata straight from the repo, with no catalog required.
+
+### Changed
+
+- `skillforge publish` now stamps license and interface metadata (`org.opencontainers.image.licenses`, `skillforge.skill.interfaces`) on the skill artifact manifest itself, so registries without a skillforge catalog still expose full `search --info` metadata.
 
 ## [0.1.10] - 2026-07-28
 

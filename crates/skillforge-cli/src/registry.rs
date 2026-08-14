@@ -43,6 +43,12 @@ pub struct SkillEntry {
     pub source_dir: PathBuf,
     pub description: String,
     pub input_schema: Value,
+    /// OCI repository this skill was installed from (e.g.
+    /// `ghcr.io/acme/skills/word-count`), recorded so `upgrade` checks for
+    /// newer versions in the right registry. `None` for local installs and
+    /// entries written before this field existed.
+    #[serde(default)]
+    pub source: Option<String>,
 }
 
 pub fn home() -> PathBuf {
@@ -124,6 +130,44 @@ pub fn entry_from_dir(dir: &Path, binary: PathBuf) -> Result<(String, SkillEntry
         source_dir: dir.to_path_buf(),
         description: manifest.skill.description,
         input_schema,
+        source: None,
     };
     Ok((manifest.skill.name, entry))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn entries_written_before_source_tracking_still_load() {
+        let json = r#"{
+            "version": "0.1.0",
+            "binary": "/tmp/word-count",
+            "source_dir": "/tmp/word-count-src",
+            "description": "Count words",
+            "input_schema": {}
+        }"#;
+        let entry: SkillEntry = serde_json::from_str(json).expect("deserialize legacy entry");
+        assert_eq!(entry.source, None);
+    }
+
+    #[test]
+    fn source_round_trips() {
+        let json = r#"{
+            "version": "0.1.0",
+            "binary": "/tmp/word-count",
+            "source_dir": "/tmp/word-count-src",
+            "description": "Count words",
+            "input_schema": {},
+            "source": "ghcr.io/acme/skills/word-count"
+        }"#;
+        let entry: SkillEntry = serde_json::from_str(json).expect("deserialize");
+        assert_eq!(
+            entry.source.as_deref(),
+            Some("ghcr.io/acme/skills/word-count")
+        );
+        let serialized = serde_json::to_string(&entry).expect("serialize");
+        assert!(serialized.contains("ghcr.io/acme/skills/word-count"));
+    }
 }

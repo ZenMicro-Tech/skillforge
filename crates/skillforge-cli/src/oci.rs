@@ -257,6 +257,30 @@ pub fn fetch_manifest_annotations(reference: &str) -> Result<BTreeMap<String, St
     })
 }
 
+/// Strip the `:tag` suffix from an OCI reference, keeping the repository.
+/// A `:` before the last `/` is a registry port, not a tag separator.
+pub fn strip_tag(reference: &str) -> &str {
+    let after_last_slash = reference.rfind('/').map(|i| i + 1).unwrap_or(0);
+    match reference[after_last_slash..].find(':') {
+        Some(colon) => &reference[..after_last_slash + colon],
+        None => reference,
+    }
+}
+
+/// True for plain `MAJOR.MINOR.PATCH` tags (no `latest`, no suffixes).
+pub fn is_bare_semver(tag: &str) -> bool {
+    !tag.is_empty()
+        && tag
+            .split('.')
+            .all(|p| !p.is_empty() && p.chars().all(|c| c.is_ascii_digit()))
+}
+
+/// Strip any platform suffix (e.g. `-darwin-arm64`) from a tag, returning
+/// the base version.
+pub fn base_version(tag: &str) -> &str {
+    tag.split('-').next().unwrap_or(tag)
+}
+
 /// Push a metadata-only manifest (no layers) with annotations to a catalog tag.
 /// Used by publish to register a skill in the catalog.
 pub fn push_catalog_entry(
@@ -603,3 +627,43 @@ fn block_on<F: std::future::Future<Output = Result<R>>, R>(fut: F) -> Result<R> 
         .context("tokio runtime")?;
     rt.block_on(fut)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn strip_tag_keeps_registry_ports() {
+        assert_eq!(
+            strip_tag("ghcr.io/acme/skills/word-count:1.2.3"),
+            "ghcr.io/acme/skills/word-count"
+        );
+        assert_eq!(
+            strip_tag("ghcr.io/acme/skills/word-count"),
+            "ghcr.io/acme/skills/word-count"
+        );
+        assert_eq!(
+            strip_tag("localhost:5000/skills/word-count:0.1.0"),
+            "localhost:5000/skills/word-count"
+        );
+        assert_eq!(
+            strip_tag("localhost:5000/skills/word-count"),
+            "localhost:5000/skills/word-count"
+        );
+    }
+
+    #[test]
+    fn is_bare_semver_rejects_latest_and_platform_tags() {
+        assert!(is_bare_semver("0.2.0"));
+        assert!(!is_bare_semver("latest"));
+        assert!(!is_bare_semver("0.2.0-darwin-arm64"));
+        assert!(!is_bare_semver(""));
+    }
+
+    #[test]
+    fn base_version_strips_platform_suffixes() {
+        assert_eq!(base_version("0.2.0-darwin-arm64"), "0.2.0");
+        assert_eq!(base_version("0.2.0"), "0.2.0");
+    }
+}
+

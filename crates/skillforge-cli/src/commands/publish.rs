@@ -233,7 +233,31 @@ fn build_annotations(
         "org.opencontainers.image.description".to_string(),
         manifest.skill.description.clone(),
     );
+    if let Some(license) = &manifest.skill.license {
+        annotations.insert(
+            "org.opencontainers.image.licenses".to_string(),
+            license.clone(),
+        );
+    }
+    annotations.insert(
+        "skillforge.skill.interfaces".to_string(),
+        interfaces_annotation(manifest),
+    );
     annotations
+}
+
+/// Comma-separated list of enabled interfaces, recorded in annotations.
+fn interfaces_annotation(manifest: &skillforge_core::Manifest) -> String {
+    [
+        manifest.interfaces.mcp.then_some("mcp"),
+        manifest.interfaces.cli.then_some("cli"),
+        manifest.interfaces.http.then_some("http"),
+        manifest.interfaces.lib.then_some("lib"),
+    ]
+    .into_iter()
+    .flatten()
+    .collect::<Vec<_>>()
+    .join(",")
 }
 
 fn push_skill(
@@ -357,18 +381,9 @@ fn push_catalog_entry_for(
         );
     }
 
-    let interfaces: Vec<&str> = [
-        manifest.interfaces.mcp.then_some("mcp"),
-        manifest.interfaces.cli.then_some("cli"),
-        manifest.interfaces.http.then_some("http"),
-        manifest.interfaces.lib.then_some("lib"),
-    ]
-    .into_iter()
-    .flatten()
-    .collect();
     annotations.insert(
         "skillforge.skill.interfaces".to_string(),
-        interfaces.join(","),
+        interfaces_annotation(manifest),
     );
     annotations.insert("skillforge.skill.repo".to_string(), skill_repo.to_string());
 
@@ -383,3 +398,56 @@ fn push_catalog_entry_for(
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const SAMPLE: &str = r#"
+[skill]
+name = "word-count"
+version = "1.0.0"
+description = "Count words."
+license = "MIT"
+
+[runtime]
+kind = "rust"
+entrypoint = "src/main.rs"
+"#;
+
+    #[test]
+    fn artifact_annotations_carry_full_info_metadata() {
+        let manifest = skillforge_core::Manifest::from_str(SAMPLE).expect("parse");
+        let annotations = build_annotations(&manifest, "1.0.0", "darwin-arm64");
+
+        assert_eq!(
+            annotations
+                .get("org.opencontainers.image.description")
+                .map(String::as_str),
+            Some("Count words.")
+        );
+        assert_eq!(
+            annotations
+                .get("org.opencontainers.image.licenses")
+                .map(String::as_str),
+            Some("MIT")
+        );
+        assert_eq!(
+            annotations
+                .get("skillforge.skill.interfaces")
+                .map(String::as_str),
+            Some("mcp,cli,http,lib")
+        );
+    }
+
+    #[test]
+    fn artifact_annotations_omit_license_when_unset() {
+        let manifest =
+            skillforge_core::Manifest::from_str(&SAMPLE.replace("license = \"MIT\"\n", ""))
+                .expect("parse");
+        let annotations = build_annotations(&manifest, "1.0.0", "darwin-arm64");
+
+        assert!(!annotations.contains_key("org.opencontainers.image.licenses"));
+    }
+}
+

@@ -1,5 +1,11 @@
-//! `skillforge upgrade` — check the OCI catalog for newer versions of
-//! installed skills and upgrade them.
+//! `skillforge upgrade` — check for newer versions of installed skills and
+//! upgrade them.
+//!
+//! Skills installed from an explicit OCI reference record their source
+//! repository in the registry (`SkillEntry::source`); those are checked
+//! against their own repo's tag list. Skills from the default namespace (and
+//! legacy installs with no recorded source) are checked against the default
+//! catalog as before.
 
 use anyhow::{Context, Result};
 
@@ -7,6 +13,7 @@ use crate::oci;
 use crate::registry;
 
 const DEFAULT_CATALOG: &str = "ghcr.io/zenmicro-tech/skillforge/skills/catalog";
+const DEFAULT_NAMESPACE: &str = "ghcr.io/zenmicro-tech/skillforge/skills";
 
 pub fn upgrade(name: Option<&str>, check_only: bool) -> Result<()> {
     let reg = registry::load()?;
@@ -33,12 +40,20 @@ pub fn upgrade(name: Option<&str>, check_only: bool) -> Result<()> {
             .collect()
     };
 
-    // Fetch the catalog tags once
-    eprintln!("fetching catalog from {DEFAULT_CATALOG}...");
-    let tags = oci::list_tags(DEFAULT_CATALOG)
-        .context("fetching skill catalog")?;
-
-    let catalog_entries = parse_catalog_tags(&tags);
+    // Fetch the default catalog tags once, but only if at least one target
+    // resolves through it — skills with a custom source repo are checked
+    // against that repo directly and shouldn't fail if the default catalog
+    // is unreachable.
+    let needs_catalog = targets
+        .iter()
+        .any(|(_, e)| matches!(resolution_for(e), Resolution::Catalog));
+    let catalog_entries = if needs_catalog {
+        eprintln!("fetching catalog from {DEFAULT_CATALOG}...");
+        let tags = oci::list_tags(DEFAULT_CATALOG).context("fetching skill catalog")?;
+        Some(parse_catalog_tags(&tags))
+    } else {
+        None
+    };
 
     let mut upgraded = 0u32;
     let mut up_to_date = 0u32;
@@ -46,20 +61,13 @@ pub fn upgrade(name: Option<&str>, check_only: bool) -> Result<()> {
     for (skill_name, entry) in &targets {
         let current_version = &entry.version;
 
-        // Find the latest version for this skill in the catalog
-        let latest = catalog_entries
-            .iter()
-            .filter(|e| e.name == *skill_name)
-            .max_by(|a, b| cmp_semver(&a.version, &b.version));
-
-        let Some(latest) = latest else {
-            eprintln!(
-                "  · {skill_name} v{current_version} — not found in catalog (skipping)"
-            );
+        // Find the latest available version for this skill, either in its
+        // recorded source repo or in the default catalog.
+        let Some(latest) = find_latest(skill_name, entry, catalog_entries.as_deref()) else {
             continue;
         };
 
-        if cmp_semver(&latest.version, current_version) != std::cmp::Ordering::Greater {
+        if cmp_semver(latest.version(), current_version) != std::cmp::Ordering::Greater {
             up_to_date += 1;
             if name.is_some() {
                 eprintln!(
@@ -71,7 +79,7 @@ pub fn upgrade(name: Option<&str>, check_only: bool) -> Result<()> {
 
         eprintln!(
             "  ↑ {skill_name} v{current_version} → v{}",
-            latest.version
+            latest.version()
         );
 
         if check_only {
@@ -79,25 +87,31 @@ pub fn upgrade(name: Option<&str>, check_only: bool) -> Result<()> {
             continue;
         }
 
-        // Resolve the OCI repo reference from the catalog entry annotations
-        let catalog_ref = format!("{DEFAULT_CATALOG}:{}", latest.tag);
-        let annotations = match oci::fetch_manifest_annotations(&catalog_ref) {
-            Ok(a) => a,
-            Err(e) => {
-                eprintln!("    ✗ failed to fetch metadata: {e}");
-                continue;
+        // Resolve the exact reference to pull. Repo-sourced skills already
+        // know it; catalog entries resolve their repo via the catalog
+        // entry's annotations (deferred to here so up-to-date checks stay
+        // cheap).
+        let reference = match &latest {
+            Latest::Repo { reference, .. } => reference.clone(),
+            Latest::Catalog { version, tag } => {
+                let catalog_ref = format!("{DEFAULT_CATALOG}:{tag}");
+                let annotations = match oci::fetch_manifest_annotations(&catalog_ref) {
+                    Ok(a) => a,
+                    Err(e) => {
+                        eprintln!("    ✗ failed to fetch metadata: {e}");
+                        continue;
+                    }
+                };
+                match annotations.get("skillforge.skill.repo") {
+                    Some(repo) => format!("{repo}:{version}"),
+                    None => {
+                        eprintln!("    ✗ catalog entry missing repo reference");
+                        continue;
+                    }
+                }
             }
         };
 
-        let repo = match annotations.get("skillforge.skill.repo") {
-            Some(r) => r.clone(),
-            None => {
-                eprintln!("    ✗ catalog entry missing repo reference");
-                continue;
-            }
-        };
-
-        let reference = format!("{repo}:{}", latest.version);
         eprintln!("    pulling {reference}...");
 
         // Pull the new version
@@ -137,7 +151,10 @@ pub fn upgrade(name: Option<&str>, check_only: bool) -> Result<()> {
             }
         };
 
-        let (_, new_entry) = registry::entry_from_dir(&dir, bin)?;
+        let (_, mut new_entry) = registry::entry_from_dir(&dir, bin)?;
+        // Preserve the recorded source so future upgrades keep checking the
+        // same registry.
+        new_entry.source = entry.source.clone();
         registry::upsert_skill(skill_name, new_entry)?;
 
         // Re-link if not in mux mode
@@ -145,7 +162,7 @@ pub fn upgrade(name: Option<&str>, check_only: bool) -> Result<()> {
             let _ = super::link::link(Some(&dir_str), None);
         }
 
-        eprintln!("    ✓ upgraded to v{}", latest.version);
+        eprintln!("    ✓ upgraded to v{}", latest.version());
         upgraded += 1;
     }
 
@@ -166,6 +183,110 @@ pub fn upgrade(name: Option<&str>, check_only: bool) -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Where to look for newer versions of an installed skill.
+enum Resolution {
+    /// The skill's own OCI repository (custom-registry installs).
+    Repo(String),
+    /// The shared default catalog (default-namespace and legacy installs).
+    Catalog,
+}
+
+fn resolution_for(entry: &registry::SkillEntry) -> Resolution {
+    let default_prefix = format!("{DEFAULT_NAMESPACE}/");
+    match &entry.source {
+        Some(repo) if *repo != DEFAULT_NAMESPACE && !repo.starts_with(&default_prefix) => {
+            Resolution::Repo(repo.clone())
+        }
+        _ => Resolution::Catalog,
+    }
+}
+
+/// The latest available version found for a skill.
+enum Latest {
+    /// Found in the skill's own repo; the exact pull reference is known.
+    Repo { version: String, reference: String },
+    /// Found in the default catalog; the pull reference is resolved from the
+    /// catalog entry's annotations only when an upgrade is actually applied.
+    Catalog { version: String, tag: String },
+}
+
+impl Latest {
+    fn version(&self) -> &str {
+        match self {
+            Latest::Repo { version, .. } | Latest::Catalog { version, .. } => version,
+        }
+    }
+}
+
+/// Find the latest available version of a skill. Skills with a recorded
+/// custom source repo are checked against that repo's tag list directly;
+/// everything else is looked up in the default catalog.
+fn find_latest(
+    skill_name: &str,
+    entry: &registry::SkillEntry,
+    catalog: Option<&[CatalogEntry]>,
+) -> Option<Latest> {
+    match resolution_for(entry) {
+        Resolution::Repo(repo) => {
+            let tags = match oci::list_tags(&repo) {
+                Ok(t) => t,
+                Err(e) => {
+                    eprintln!("  · {skill_name} — failed to query {repo}: {e} (skipping)");
+                    return None;
+                }
+            };
+            match pick_latest_tag(&tags, &super::pull::current_platform()) {
+                Some(tag) => Some(Latest::Repo {
+                    version: oci::base_version(&tag).to_string(),
+                    reference: format!("{repo}:{tag}"),
+                }),
+                None => {
+                    eprintln!(
+                        "  · {skill_name} v{} — no versions found in {repo} (skipping)",
+                        entry.version
+                    );
+                    None
+                }
+            }
+        }
+        Resolution::Catalog => {
+            let latest = catalog
+                .unwrap_or(&[])
+                .iter()
+                .filter(|e| e.name == skill_name)
+                .max_by(|a, b| cmp_semver(&a.version, &b.version));
+            match latest {
+                Some(e) => Some(Latest::Catalog {
+                    version: e.version.clone(),
+                    tag: e.tag.clone(),
+                }),
+                None => {
+                    eprintln!(
+                        "  · {skill_name} v{} — not found in catalog (skipping)",
+                        entry.version
+                    );
+                    None
+                }
+            }
+        }
+    }
+}
+
+/// Pick the best tag to install from a repo's tag list: highest semver,
+/// preferring a platform-specific build for `platform` when one exists.
+fn pick_latest_tag(tags: &[String], platform: &str) -> Option<String> {
+    let platform_suffix = format!("-{platform}");
+    tags.iter()
+        .filter(|t| t.ends_with(&platform_suffix))
+        .max_by(|a, b| cmp_semver(a, b))
+        .or_else(|| {
+            tags.iter()
+                .filter(|t| oci::is_bare_semver(t))
+                .max_by(|a, b| cmp_semver(a, b))
+        })
+        .cloned()
 }
 
 struct CatalogEntry {
@@ -201,4 +322,75 @@ fn cmp_semver(a: &str, b: &str) -> std::cmp::Ordering {
         )
     };
     parse(a).cmp(&parse(b))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    fn entry_with_source(source: Option<&str>) -> registry::SkillEntry {
+        registry::SkillEntry {
+            version: "0.1.0".to_string(),
+            binary: PathBuf::new(),
+            source_dir: PathBuf::new(),
+            description: String::new(),
+            input_schema: serde_json::Value::Null,
+            source: source.map(str::to_string),
+        }
+    }
+
+    #[test]
+    fn skills_without_recorded_source_use_the_default_catalog() {
+        assert!(matches!(
+            resolution_for(&entry_with_source(None)),
+            Resolution::Catalog
+        ));
+    }
+
+    #[test]
+    fn default_namespace_sources_use_the_default_catalog() {
+        let entry = entry_with_source(Some("ghcr.io/zenmicro-tech/skillforge/skills/word-count"));
+        assert!(matches!(resolution_for(&entry), Resolution::Catalog));
+    }
+
+    #[test]
+    fn custom_registry_sources_are_checked_against_their_own_repo() {
+        let entry = entry_with_source(Some("ghcr.io/acme/skills/word-count"));
+        match resolution_for(&entry) {
+            Resolution::Repo(repo) => assert_eq!(repo, "ghcr.io/acme/skills/word-count"),
+            Resolution::Catalog => panic!("expected repo resolution"),
+        }
+    }
+
+    #[test]
+    fn similarly_prefixed_namespaces_are_not_treated_as_default() {
+        let entry = entry_with_source(Some("ghcr.io/zenmicro-tech/skillforge/skills-mirror/wc"));
+        assert!(matches!(resolution_for(&entry), Resolution::Repo(_)));
+    }
+
+    #[test]
+    fn pick_latest_tag_prefers_platform_specific_builds() {
+        let tags = vec![
+            "0.1.0".to_string(),
+            "0.2.0".to_string(),
+            "0.2.0-darwin-arm64".to_string(),
+            "0.2.0-linux-amd64".to_string(),
+            "latest".to_string(),
+        ];
+        assert_eq!(
+            pick_latest_tag(&tags, "darwin-arm64").as_deref(),
+            Some("0.2.0-darwin-arm64")
+        );
+        assert_eq!(
+            pick_latest_tag(&tags, "windows-amd64").as_deref(),
+            Some("0.2.0")
+        );
+    }
+
+    #[test]
+    fn pick_latest_tag_ignores_non_semver_tags() {
+        let tags = vec!["latest".to_string(), "nightly".to_string()];
+        assert_eq!(pick_latest_tag(&tags, "darwin-arm64"), None);
+    }
 }
