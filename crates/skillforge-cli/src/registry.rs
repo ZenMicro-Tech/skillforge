@@ -36,6 +36,37 @@ pub struct MuxState {
     pub agents: Vec<String>,
 }
 
+/// Where an installed skill came from. Recorded at install time so both
+/// `list` and `upgrade` know the provenance explicitly.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SkillSource {
+    /// Pulled from an OCI registry repository (e.g.
+    /// `ghcr.io/acme/skills/word-count`).
+    Oci(String),
+    /// Installed from a local directory on disk.
+    Local,
+}
+
+impl Serialize for SkillSource {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self {
+            SkillSource::Oci(repo) => serializer.serialize_str(repo),
+            SkillSource::Local => serializer.serialize_str("local"),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for SkillSource {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(deserializer)?;
+        Ok(if s == "local" {
+            SkillSource::Local
+        } else {
+            SkillSource::Oci(s)
+        })
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SkillEntry {
     pub version: String,
@@ -43,12 +74,10 @@ pub struct SkillEntry {
     pub source_dir: PathBuf,
     pub description: String,
     pub input_schema: Value,
-    /// OCI repository this skill was installed from (e.g.
-    /// `ghcr.io/acme/skills/word-count`), recorded so `upgrade` checks for
-    /// newer versions in the right registry. `None` for local installs and
-    /// entries written before this field existed.
-    #[serde(default)]
-    pub source: Option<String>,
+    /// Where this skill was installed from. `None` only for entries written
+    /// before source tracking existed; new installs always record a source.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<SkillSource>,
 }
 
 pub fn home() -> PathBuf {
@@ -153,7 +182,7 @@ mod tests {
     }
 
     #[test]
-    fn source_round_trips() {
+    fn oci_source_round_trips_as_a_plain_string() {
         let json = r#"{
             "version": "0.1.0",
             "binary": "/tmp/word-count",
@@ -164,10 +193,42 @@ mod tests {
         }"#;
         let entry: SkillEntry = serde_json::from_str(json).expect("deserialize");
         assert_eq!(
-            entry.source.as_deref(),
-            Some("ghcr.io/acme/skills/word-count")
+            entry.source,
+            Some(SkillSource::Oci(
+                "ghcr.io/acme/skills/word-count".to_string()
+            ))
         );
         let serialized = serde_json::to_string(&entry).expect("serialize");
-        assert!(serialized.contains("ghcr.io/acme/skills/word-count"));
+        assert!(serialized.contains(r#""source":"ghcr.io/acme/skills/word-count""#));
+    }
+
+    #[test]
+    fn local_source_round_trips() {
+        let json = r#"{
+            "version": "0.1.0",
+            "binary": "/tmp/word-count",
+            "source_dir": "/tmp/word-count-src",
+            "description": "Count words",
+            "input_schema": {},
+            "source": "local"
+        }"#;
+        let entry: SkillEntry = serde_json::from_str(json).expect("deserialize");
+        assert_eq!(entry.source, Some(SkillSource::Local));
+        let serialized = serde_json::to_string(&entry).expect("serialize");
+        assert!(serialized.contains(r#""source":"local""#));
+    }
+
+    #[test]
+    fn absent_source_is_not_serialized() {
+        let entry = SkillEntry {
+            version: "0.1.0".to_string(),
+            binary: PathBuf::new(),
+            source_dir: PathBuf::new(),
+            description: String::new(),
+            input_schema: Value::Null,
+            source: None,
+        };
+        let serialized = serde_json::to_string(&entry).expect("serialize");
+        assert!(!serialized.contains("\"source\":"));
     }
 }

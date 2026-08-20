@@ -22,17 +22,27 @@ pub fn add(name_or_ref: &str) -> Result<()> {
     let (dir, source) = if is_oci_ref(name_or_ref) {
         let reference = resolve_oci_tag(name_or_ref)?;
         let dir = super::pull::fetch_oci(&reference)?;
-        (dir, Some(oci::strip_tag(&reference).to_string()))
+        (
+            dir,
+            Some(registry::SkillSource::Oci(
+                oci::strip_tag(&reference).to_string(),
+            )),
+        )
     } else {
         let (name, tag) = split_bare_ref(name_or_ref);
         match sources::resolve(name) {
-            Ok(dir) if tag.is_none() => (dir, None),
+            Ok(dir) if tag.is_none() => (dir, Some(registry::SkillSource::Local)),
             Ok(_) | Err(_) => {
                 let reference = resolve_default_repo(name, tag);
                 eprintln!("not found locally; pulling {reference}...");
                 let reference = resolve_oci_tag(&reference)?;
                 let dir = super::pull::fetch_oci(&reference)?;
-                (dir, Some(oci::strip_tag(&reference).to_string()))
+                (
+                    dir,
+                    Some(registry::SkillSource::Oci(
+                        oci::strip_tag(&reference).to_string(),
+                    )),
+                )
             }
         }
     };
