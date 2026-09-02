@@ -84,13 +84,45 @@ fn list_all() -> Result<()> {
         println!("  Use `skillforge add <name>` to install a skill.");
         return Ok(());
     }
-    println!("{:<20} {:<10} {}", "NAME", "VERSION", "DESCRIPTION");
-    println!("{:<20} {:<10} {}", "----", "-------", "-----------");
+    println!(
+        "{:<20} {:<10} {:<40} {}",
+        "NAME", "VERSION", "DESCRIPTION", "SOURCE"
+    );
+    println!(
+        "{:<20} {:<10} {:<40} {}",
+        "----", "-------", "-----------", "------"
+    );
     for (name, entry) in &reg.skills {
-        println!("{:<20} {:<10} {}", name, entry.version, entry.description);
+        let staged_dir = registry::home().join("skills");
+        let source = display_source(name, entry, &staged_dir);
+        println!(
+            "{:<20} {:<10} {:<40} {}",
+            name, entry.version, entry.description, source
+        );
     }
     println!("\n{} skill(s) installed.", reg.skills.len());
     Ok(())
+}
+
+const DEFAULT_REGISTRY: &str = "ghcr.io/zenmicro-tech/skillforge/skills";
+
+/// What to show in the SOURCE column. Recorded sources are shown verbatim.
+/// Entries predating source tracking need inference: registry pulls are
+/// staged under `~/.skillforge/skills/` (and before tracking, almost always
+/// came from the default registry), anything else was installed from disk.
+fn display_source(
+    name: &str,
+    entry: &registry::SkillEntry,
+    staged_dir: &std::path::Path,
+) -> String {
+    match &entry.source {
+        Some(registry::SkillSource::Oci(repo)) => repo.clone(),
+        Some(registry::SkillSource::Local) => "local".to_string(),
+        None if entry.source_dir.starts_with(staged_dir) => {
+            format!("{DEFAULT_REGISTRY}/{name} (assumed)")
+        }
+        None => "local".to_string(),
+    }
 }
 
 fn list_detail(path: Option<&str>) -> Result<()> {
@@ -135,4 +167,57 @@ fn resolve(path: Option<&str>) -> Result<(PathBuf, String, PathBuf)> {
 
 fn binary_path(dir: &Path, name: &str) -> PathBuf {
     dir.join("target/release").join(name)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn entry(source: Option<&str>, source_dir: &str) -> registry::SkillEntry {
+        registry::SkillEntry {
+            version: "0.1.0".to_string(),
+            binary: PathBuf::new(),
+            source_dir: PathBuf::from(source_dir),
+            description: String::new(),
+            input_schema: serde_json::Value::Null,
+            source: source.map(|s| registry::SkillSource::Oci(s.to_string())),
+        }
+    }
+
+    #[test]
+    fn recorded_sources_are_shown_verbatim() {
+        let staged = Path::new("/home/u/.skillforge/skills");
+        let entry = entry(Some("ghcr.io/acme/skills/word-count"), "/anywhere");
+        assert_eq!(
+            display_source("word-count", &entry, staged),
+            "ghcr.io/acme/skills/word-count"
+        );
+    }
+
+    #[test]
+    fn staged_entries_without_source_assume_the_default_registry() {
+        let staged = Path::new("/home/u/.skillforge/skills");
+        let entry = entry(None, "/home/u/.skillforge/skills/word-count");
+        assert_eq!(
+            display_source("word-count", &entry, staged),
+            "ghcr.io/zenmicro-tech/skillforge/skills/word-count (assumed)"
+        );
+    }
+
+    #[test]
+    fn unstaged_entries_without_source_are_local() {
+        let staged = Path::new("/home/u/.skillforge/skills");
+        let entry = entry(None, "/home/u/projects/word-count");
+        assert_eq!(display_source("word-count", &entry, staged), "local");
+    }
+
+    #[test]
+    fn tracked_local_sources_are_shown_as_local_without_assumption() {
+        // Even if a local install happens to be staged under the skills dir,
+        // an explicitly tracked local source wins over inference.
+        let staged = Path::new("/home/u/.skillforge/skills");
+        let mut entry = entry(None, "/home/u/.skillforge/skills/word-count");
+        entry.source = Some(registry::SkillSource::Local);
+        assert_eq!(display_source("word-count", &entry, staged), "local");
+    }
 }

@@ -130,6 +130,9 @@ enum Command {
         /// Only check for updates, don't install them.
         #[arg(long, short)]
         check: bool,
+        /// List every skill checked, including ones already up to date.
+        #[arg(long, short)]
+        verbose: bool,
         /// Upgrade a specific skill by name. Omit to upgrade all.
         name: Option<String>,
     },
@@ -215,9 +218,11 @@ fn main() -> Result<()> {
             MuxAction::Status => commands::mux::status(),
             MuxAction::Serve => commands::mux::serve(),
         },
-        Command::Upgrade { name, check } => {
-            commands::upgrade::upgrade(name.as_deref(), check)
-        }
+        Command::Upgrade {
+            name,
+            check,
+            verbose,
+        } => commands::upgrade::upgrade(name.as_deref(), check, verbose),
         Command::Login {
             registry,
             username,

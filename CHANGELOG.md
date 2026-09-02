@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.12] - 2026-08-12
+
+### Added
+
+- `skillforge list` now shows a `SOURCE` column with the OCI repository each skill was installed from. Entries recorded before source tracking show the default registry repo marked `(assumed)` when the skill was clearly pulled (staged under `~/.skillforge/skills/`), or `local` for skills installed from disk.
+- `skillforge upgrade --verbose` (`-v`) lists every skill checked, including ones already up to date. By default only available upgrades and skipped skills are listed per-skill; up-to-date skills appear only in the summary count.
+
+### Changed
+
+- Skill provenance is now tracked explicitly in `registry.json`: `"source": "<oci-repo>"` for registry pulls or `"source": "local"` for installs from disk (previously local installs recorded nothing, making them indistinguishable from pre-tracking legacy entries). `skillforge upgrade` skips locally-installed skills with an explanatory note instead of looking them up in a registry. The `(assumed)` marker in `skillforge list` now only appears for entries written before source tracking existed.
+- `skillforge upgrade` now checks every skill with a recorded source repo directly against that repo's tags — including default-namespace installs. Previously those still resolved through the default catalog, which silently missed skills whose catalog entry was never published (catalog registration is best-effort). Only installs predating source tracking still use the catalog.
+- `skillforge upgrade` reports how many skills were skipped (unreachable registry, missing catalog entry) instead of claiming all skills are up to date.
+
 ## [0.1.11] - 2026-08-12
 
 ### Added

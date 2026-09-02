@@ -1,11 +1,11 @@
 //! `skillforge upgrade` — check for newer versions of installed skills and
 //! upgrade them.
 //!
-//! Skills installed from an explicit OCI reference record their source
-//! repository in the registry (`SkillEntry::source`); those are checked
-//! against their own repo's tag list. Skills from the default namespace (and
-//! legacy installs with no recorded source) are checked against the default
-//! catalog as before.
+//! Skills installed from an OCI reference record their source repository in
+//! the registry (`SkillEntry::source`); those are checked against their own
+//! repo's tag list, which is authoritative — catalog entries are best-effort
+//! and can be missing. Only legacy installs with no recorded source fall
+//! back to the default catalog.
 
 use anyhow::{Context, Result};
 
@@ -13,9 +13,8 @@ use crate::oci;
 use crate::registry;
 
 const DEFAULT_CATALOG: &str = "ghcr.io/zenmicro-tech/skillforge/skills/catalog";
-const DEFAULT_NAMESPACE: &str = "ghcr.io/zenmicro-tech/skillforge/skills";
 
-pub fn upgrade(name: Option<&str>, check_only: bool) -> Result<()> {
+pub fn upgrade(name: Option<&str>, check_only: bool, verbose: bool) -> Result<()> {
     let reg = registry::load()?;
 
     if reg.skills.is_empty() {
@@ -57,19 +56,29 @@ pub fn upgrade(name: Option<&str>, check_only: bool) -> Result<()> {
 
     let mut upgraded = 0u32;
     let mut up_to_date = 0u32;
+    let mut skipped = 0u32;
 
     for (skill_name, entry) in &targets {
         let current_version = &entry.version;
 
+        if matches!(resolution_for(entry), Resolution::Local) {
+            eprintln!(
+                "  · {skill_name} — installed from disk; no registry to check (skipping)"
+            );
+            skipped += 1;
+            continue;
+        }
+
         // Find the latest available version for this skill, either in its
         // recorded source repo or in the default catalog.
         let Some(latest) = find_latest(skill_name, entry, catalog_entries.as_deref()) else {
+            skipped += 1;
             continue;
         };
 
         if cmp_semver(latest.version(), current_version) != std::cmp::Ordering::Greater {
             up_to_date += 1;
-            if name.is_some() {
+            if verbose || name.is_some() {
                 eprintln!(
                     "  ✓ {skill_name} v{current_version} is already up to date"
                 );
@@ -166,19 +175,29 @@ pub fn upgrade(name: Option<&str>, check_only: bool) -> Result<()> {
         upgraded += 1;
     }
 
+    let skipped_note = if skipped > 0 {
+        format!(" ({skipped} skipped)")
+    } else {
+        String::new()
+    };
+
     if check_only {
-        if upgraded == 0 {
-            eprintln!("\nAll {up_to_date} installed skill(s) are up to date.");
-        } else {
+        if upgraded > 0 {
             eprintln!(
-                "\n{upgraded} upgrade(s) available. Run `skillforge upgrade` to apply."
+                "\n{upgraded} upgrade(s) available. Run `skillforge upgrade` to apply.{skipped_note}"
             );
+        } else if up_to_date > 0 {
+            eprintln!("\nAll {up_to_date} installed skill(s) are up to date.{skipped_note}");
+        } else {
+            eprintln!("\nNo upgrades found.{skipped_note}");
         }
     } else {
-        if upgraded == 0 && up_to_date > 0 {
-            eprintln!("\nAll {up_to_date} installed skill(s) are up to date.");
-        } else if upgraded > 0 {
-            eprintln!("\n{upgraded} skill(s) upgraded.");
+        if upgraded > 0 {
+            eprintln!("\n{upgraded} skill(s) upgraded.{skipped_note}");
+        } else if up_to_date > 0 {
+            eprintln!("\nAll {up_to_date} installed skill(s) are up to date.{skipped_note}");
+        } else if skipped > 0 {
+            eprintln!("\nNo skills could be checked.{skipped_note}");
         }
     }
 
@@ -187,19 +206,19 @@ pub fn upgrade(name: Option<&str>, check_only: bool) -> Result<()> {
 
 /// Where to look for newer versions of an installed skill.
 enum Resolution {
-    /// The skill's own OCI repository (custom-registry installs).
+    /// The skill's own OCI repository (any install with a recorded source).
     Repo(String),
-    /// The shared default catalog (default-namespace and legacy installs).
+    /// The shared default catalog (legacy installs with no recorded source).
     Catalog,
+    /// Installed from disk — there is no remote source to check.
+    Local,
 }
 
 fn resolution_for(entry: &registry::SkillEntry) -> Resolution {
-    let default_prefix = format!("{DEFAULT_NAMESPACE}/");
     match &entry.source {
-        Some(repo) if *repo != DEFAULT_NAMESPACE && !repo.starts_with(&default_prefix) => {
-            Resolution::Repo(repo.clone())
-        }
-        _ => Resolution::Catalog,
+        Some(registry::SkillSource::Oci(repo)) => Resolution::Repo(repo.clone()),
+        Some(registry::SkillSource::Local) => Resolution::Local,
+        None => Resolution::Catalog,
     }
 }
 
@@ -229,6 +248,10 @@ fn find_latest(
     catalog: Option<&[CatalogEntry]>,
 ) -> Option<Latest> {
     match resolution_for(entry) {
+        Resolution::Local => {
+            // Handled before find_latest is called; nothing to check remotely.
+            None
+        }
         Resolution::Repo(repo) => {
             let tags = match oci::list_tags(&repo) {
                 Ok(t) => t,
@@ -336,7 +359,7 @@ mod tests {
             source_dir: PathBuf::new(),
             description: String::new(),
             input_schema: serde_json::Value::Null,
-            source: source.map(str::to_string),
+            source: source.map(|s| registry::SkillSource::Oci(s.to_string())),
         }
     }
 
@@ -349,24 +372,25 @@ mod tests {
     }
 
     #[test]
-    fn default_namespace_sources_use_the_default_catalog() {
-        let entry = entry_with_source(Some("ghcr.io/zenmicro-tech/skillforge/skills/word-count"));
-        assert!(matches!(resolution_for(&entry), Resolution::Catalog));
+    fn local_installs_have_no_remote_resolution() {
+        let mut entry = entry_with_source(None);
+        entry.source = Some(registry::SkillSource::Local);
+        assert!(matches!(resolution_for(&entry), Resolution::Local));
     }
 
     #[test]
-    fn custom_registry_sources_are_checked_against_their_own_repo() {
-        let entry = entry_with_source(Some("ghcr.io/acme/skills/word-count"));
-        match resolution_for(&entry) {
-            Resolution::Repo(repo) => assert_eq!(repo, "ghcr.io/acme/skills/word-count"),
-            Resolution::Catalog => panic!("expected repo resolution"),
+    fn any_recorded_source_is_checked_against_its_own_repo() {
+        // Repo tags are authoritative — catalog entries are best-effort and
+        // can be missing even for default-namespace skills.
+        for repo in [
+            "ghcr.io/acme/skills/word-count",
+            "ghcr.io/zenmicro-tech/skillforge/skills/word-count",
+        ] {
+            match resolution_for(&entry_with_source(Some(repo))) {
+                Resolution::Repo(r) => assert_eq!(r, repo),
+                _ => panic!("expected repo resolution for {repo}"),
+            }
         }
-    }
-
-    #[test]
-    fn similarly_prefixed_namespaces_are_not_treated_as_default() {
-        let entry = entry_with_source(Some("ghcr.io/zenmicro-tech/skillforge/skills-mirror/wc"));
-        assert!(matches!(resolution_for(&entry), Resolution::Repo(_)));
     }
 
     #[test]
